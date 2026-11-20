@@ -15,6 +15,7 @@ import threading
 from array import array
 import time
 import traceback
+import urllib.parse
 import urllib.request
 import winreg
 from ctypes import wintypes
@@ -100,8 +101,15 @@ TEXT_X, TEXT_W = 119, 118            # title / controls / slider column
 DIVIDER_1_X, DIVIDER_2_X = 249, 533
 CAL_RECT = QRect(259, 44, 268, 96)
 RING_RECT = QRect(543, 44, 90, 90)      # 9px clear of the right edge
+# --- home layout: three glass cards (agent | now playing | system)
+AGENT_CARD = QRect(14, 40, 148, 103)
+MUSIC_CARD = QRect(170, 40, 282, 103)
+SYS_CARD = QRect(460, 40, 168, 103)
+HX, HW = 282, 160                       # text column of the now-playing card
+HOME_RING = QPoint(464, 44)
+DATE_RECT = QRect(556, 48, 68, 90)
 SANS = ["Segoe UI Variable Text", "Segoe UI"]
-DISPLAY = ["Bahnschrift", "Segoe UI Variable Display", "Segoe UI"]
+DISPLAY = ["Segoe UI Variable Display", "Segoe UI Variable Text", "Segoe UI"]
 PREFERRED_DISPLAY = ["Space Grotesk", "Sora", "Outfit", "Manrope", "Plus Jakarta Sans", "Inter Display", "Inter"]
 _CUSTOM_FAMILIES: list[str] = []
 DEFAULT_TINT = QColor(34, 40, 62)
@@ -133,6 +141,9 @@ AUDIO_RATE = 48000
 AUDIO_CHANNELS = 2
 AUDIO_BLOCK = AUDIO_CHANNELS * 2           # 16-bit stereo frame
 CAPTURE_CFG = Path(os.environ.get("APPDATA") or Path.home()) / "Liquify Island" / "capture.json"
+FOCUS_CFG = Path(os.environ.get("APPDATA") or Path.home()) / "Liquify Island" / "focus.json"
+LYRICS_CFG = Path(os.environ.get("APPDATA") or Path.home()) / "Liquify Island" / "lyrics.json"
+DETAIL_TOP = 35                      # the three expandable views start under the nav trays
 _MENU_QSS = ("QMenu { background-color: rgba(29, 33, 46, 247); color: white; padding: 7px;"
              " border: 1px solid rgba(255,255,255,72); border-radius: 16px; }"
              "QMenu::item { padding: 8px 20px 8px 30px; margin: 1px 3px; border-radius: 9px;"
@@ -532,6 +543,7 @@ def ui_font(px: int, weight=QFont.Weight.Normal, display: bool = False, spacing:
     f.setFamilies((_CUSTOM_FAMILIES + DISPLAY) if display else SANS)
     f.setPixelSize(px)
     f.setWeight(weight)
+    f.setStyleStrategy(QFont.PreferAntialias)
     if spacing:
         f.setLetterSpacing(QFont.AbsoluteSpacing, spacing)
     return f
@@ -837,6 +849,25 @@ def create_icon_pixmap(kind: str, size: int = 18, color: QColor | None = None) -
         stroke(2.0)
         p.drawLine(QPointF(9.5, 6.5), QPointF(15.0, 12.0))
         p.drawLine(QPointF(15.0, 12.0), QPointF(9.5, 17.5))
+    elif kind == "back":
+        stroke(2.0)
+        p.drawLine(QPointF(14.5, 6.5), QPointF(9.0, 12.0))
+        p.drawLine(QPointF(9.0, 12.0), QPointF(14.5, 17.5))
+    elif kind == "power":
+        stroke(1.9)
+        p.drawArc(QRectF(4.6, 4.6, 14.8, 14.8), -55 * 16, -250 * 16)
+        p.drawLine(QPointF(12.0, 3.2), QPointF(12.0, 10.8))
+    elif kind == "lyrics":
+        stroke(1.8)
+        p.drawLine(QPointF(4.5, 7.5), QPointF(19.5, 7.5))
+        p.drawLine(QPointF(4.5, 12.0), QPointF(19.5, 12.0))
+        p.drawLine(QPointF(4.5, 16.5), QPointF(13.5, 16.5))
+    elif kind == "info":
+        stroke(1.8)
+        p.drawEllipse(QPointF(12.0, 12.0), 8.4, 8.4)
+        p.drawLine(QPointF(12.0, 11.0), QPointF(12.0, 16.4))
+        fill()
+        p.drawEllipse(QPointF(12.0, 7.6), 1.15, 1.15)
     elif kind == "folder":
         stroke(1.7)
         path = QPainterPath()
@@ -844,6 +875,37 @@ def create_icon_pixmap(kind: str, size: int = 18, color: QColor | None = None) -
         path.lineTo(20.6, 9.6); path.lineTo(20.6, 18.4); path.lineTo(3.4, 18.4)
         path.closeSubpath()
         p.drawPath(path)
+    elif kind == "timer":
+        stroke(1.8)
+        p.drawEllipse(QPointF(12.0, 13.4), 7.0, 7.0)
+        p.drawLine(QPointF(12.0, 13.4), QPointF(12.0, 9.4))
+        p.drawLine(QPointF(12.0, 13.4), QPointF(14.9, 14.8))
+        p.drawLine(QPointF(12.0, 3.4), QPointF(12.0, 5.6))
+        p.drawLine(QPointF(9.2, 2.6), QPointF(12.0, 3.4))
+    elif kind == "sparkle":
+        fill()
+        star = QPainterPath()
+        star.moveTo(12.0, 3.2)
+        star.cubicTo(13.4, 8.6, 15.4, 10.6, 20.8, 12.0)
+        star.cubicTo(15.4, 13.4, 13.4, 15.4, 12.0, 20.8)
+        star.cubicTo(10.6, 15.4, 8.6, 13.4, 3.2, 12.0)
+        star.cubicTo(8.6, 10.6, 10.6, 8.6, 12.0, 3.2)
+        p.drawPath(star)
+    elif kind == "reset":
+        stroke(1.9)
+        p.drawArc(QRectF(4.6, 4.6, 14.8, 14.8), 46 * 16, 270 * 16)
+        fill()
+        tri((2.6, 9.4), (9.4, 8.0), (5.6, 12.8))
+    elif kind == "check":
+        stroke(2.2)
+        p.drawLine(QPointF(5.0, 12.6), QPointF(10.0, 17.4))
+        p.drawLine(QPointF(10.0, 17.4), QPointF(19.0, 6.6))
+    elif kind == "terminal":
+        stroke(1.7)
+        p.drawRoundedRect(QRectF(3.0, 4.6, 18.0, 14.8), 3.0, 3.0)
+        p.drawLine(QPointF(6.6, 9.4), QPointF(9.8, 12.0))
+        p.drawLine(QPointF(9.8, 12.0), QPointF(6.6, 14.6))
+        p.drawLine(QPointF(12.4, 14.8), QPointF(17.0, 14.8))
     elif kind in ("mic", "mic_off"):
         stroke(1.8)
         p.drawRoundedRect(QRectF(9.0, 3.0, 6.0, 10.5), 3.0, 3.0)
@@ -2108,6 +2170,7 @@ class BluetoothAudioDevice:
     dev_type: str
     product: str
     battery: int | None
+    mac: str = ""
 
 
 _HEADPHONE_WORDS = ("headphone", "headset", "wh-", "xm4", "xm5", "xm3", "quietcomfort",
@@ -2255,6 +2318,169 @@ def bluetooth_mac(instance_id: str) -> str:
         if mac.strip("0"):
             return mac
     return ""
+
+
+_MAC_TEXT_RX = re.compile(r"(?<![0-9A-Fa-f])(?:[0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}")
+
+
+def bluetooth_mac_any(text: str) -> str:
+    """Bluetooth address from any device id shape, including AEP ids that use
+    colon-separated addresses (Bluetooth#Bluetooth90:A0:BE:...)."""
+    mac = bluetooth_mac(text or "")
+    if mac:
+        return mac
+    match = _MAC_TEXT_RX.search(text or "")
+    return match.group(0).replace(":", "").replace("-", "").upper() if match else ""
+
+
+class _BtAddress(ctypes.Structure):
+    _fields_ = [("ullLong", ctypes.c_ulonglong)]
+
+
+class _BtSystemTime(ctypes.Structure):
+    _fields_ = [(name, wintypes.WORD) for name in
+                ("wYear", "wMonth", "wDayOfWeek", "wDay", "wHour", "wMinute",
+                 "wSecond", "wMilliseconds")]
+
+
+class _BtDeviceInfo(ctypes.Structure):
+    _fields_ = [("dwSize", wintypes.DWORD), ("Address", _BtAddress),
+                ("ulClassofDevice", wintypes.ULONG),
+                ("fConnected", wintypes.BOOL), ("fRemembered", wintypes.BOOL),
+                ("fAuthenticated", wintypes.BOOL),
+                ("stLastSeen", _BtSystemTime), ("stLastUsed", _BtSystemTime),
+                ("szName", ctypes.c_wchar * 248)]
+
+
+class _BtSearchParams(ctypes.Structure):
+    _fields_ = [("dwSize", wintypes.DWORD), ("fReturnAuthenticated", wintypes.BOOL),
+                ("fReturnRemembered", wintypes.BOOL), ("fReturnUnknown", wintypes.BOOL),
+                ("fReturnConnected", wintypes.BOOL), ("fIssueInquiry", wintypes.BOOL),
+                ("cTimeoutMultiplier", ctypes.c_ubyte), ("hRadio", wintypes.HANDLE)]
+
+
+class _BtRadioParams(ctypes.Structure):
+    _fields_ = [("dwSize", wintypes.DWORD)]
+
+
+# bthioctl.h: CTL_CODE(FILE_DEVICE_BLUETOOTH (0x41), 0x03, METHOD_BUFFERED,
+# FILE_ANY_ACCESS).
+_BTH_DISCONNECT_IOCTL = 0x41000C
+
+
+def _close_bt_handle(handle):
+    """Close a radio handle handed back by BluetoothFindFirstRadio."""
+    try:
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+        kernel32.CloseHandle(handle)
+    except Exception:
+        pass
+
+
+def bluetooth_link_state(mac: str):
+    """Live link state straight from the radio: True, False, or None if unseen.
+
+    WinRT's BluetoothDevice queries can stall for seconds once the stack is
+    holding a cached device, so the disconnect path asks the radio instead.
+    """
+    if not mac:
+        return None
+    try:
+        root = os.environ.get("SystemRoot", r"C:\Windows")
+        dll = ctypes.WinDLL(os.path.join(root, "System32", "bthprops.cpl"))
+        dll.BluetoothFindFirstRadio.argtypes = [ctypes.POINTER(_BtRadioParams),
+                                               ctypes.POINTER(wintypes.HANDLE)]
+        dll.BluetoothFindFirstRadio.restype = wintypes.HANDLE
+        dll.BluetoothFindRadioClose.argtypes = [wintypes.HANDLE]
+        dll.BluetoothFindFirstDevice.argtypes = [ctypes.POINTER(_BtSearchParams),
+                                                 ctypes.POINTER(_BtDeviceInfo)]
+        dll.BluetoothFindFirstDevice.restype = wintypes.HANDLE
+        dll.BluetoothFindNextDevice.argtypes = [wintypes.HANDLE,
+                                                ctypes.POINTER(_BtDeviceInfo)]
+        dll.BluetoothFindNextDevice.restype = wintypes.BOOL
+        dll.BluetoothFindDeviceClose.argtypes = [wintypes.HANDLE]
+
+        params = _BtRadioParams()
+        params.dwSize = ctypes.sizeof(params)
+        radio = wintypes.HANDLE()
+        find = dll.BluetoothFindFirstRadio(ctypes.byref(params), ctypes.byref(radio))
+        if not find:
+            return None
+        device_find = None
+        try:
+            search = _BtSearchParams()
+            search.dwSize = ctypes.sizeof(search)
+            search.fReturnAuthenticated = True
+            search.fReturnRemembered = True
+            search.fReturnConnected = True
+            search.hRadio = radio
+            info = _BtDeviceInfo()
+            info.dwSize = ctypes.sizeof(info)
+            device_find = dll.BluetoothFindFirstDevice(ctypes.byref(search),
+                                                       ctypes.byref(info))
+            target = int(mac, 16)
+            while device_find:
+                if info.Address.ullLong == target:
+                    return bool(info.fConnected)
+                info = _BtDeviceInfo()
+                info.dwSize = ctypes.sizeof(info)
+                if not dll.BluetoothFindNextDevice(device_find, ctypes.byref(info)):
+                    break
+            return False
+        finally:
+            if device_find:
+                dll.BluetoothFindDeviceClose(device_find)
+            dll.BluetoothFindRadioClose(find)
+            _close_bt_handle(radio)
+    except Exception:
+        return None
+
+
+def bluetooth_disconnect_audio(mac: str) -> bool:
+    """Drop the link to a paired device without disturbing the pairing.
+
+    Windows has no public "disconnect" call, but the Bluetooth port driver
+    accepts IOCTL_BTH_DISCONNECT_DEVICE on the radio handle and drops the ACL
+    link. Flipping the device's audio services instead also stripped them from
+    the paired record, so Windows' own Connect button then failed on it until
+    the device had been paired again.
+    """
+    if not mac:
+        return False
+    try:
+        root = os.environ.get("SystemRoot", r"C:\Windows")
+        dll = ctypes.WinDLL(os.path.join(root, "System32", "bthprops.cpl"))
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        dll.BluetoothFindFirstRadio.argtypes = [ctypes.POINTER(_BtRadioParams),
+                                               ctypes.POINTER(wintypes.HANDLE)]
+        dll.BluetoothFindFirstRadio.restype = wintypes.HANDLE
+        dll.BluetoothFindRadioClose.argtypes = [wintypes.HANDLE]
+        kernel32.DeviceIoControl.argtypes = [wintypes.HANDLE, wintypes.DWORD,
+                                            ctypes.c_void_p, wintypes.DWORD,
+                                            ctypes.c_void_p, wintypes.DWORD,
+                                            ctypes.POINTER(wintypes.DWORD),
+                                            ctypes.c_void_p]
+        kernel32.DeviceIoControl.restype = wintypes.BOOL
+        kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+
+        params = _BtRadioParams()
+        params.dwSize = ctypes.sizeof(params)
+        radio = wintypes.HANDLE()
+        find = dll.BluetoothFindFirstRadio(ctypes.byref(params), ctypes.byref(radio))
+        if not find:
+            return False
+        try:
+            address = ctypes.c_ulonglong(int(mac, 16))
+            returned = wintypes.DWORD()
+            return bool(kernel32.DeviceIoControl(radio, _BTH_DISCONNECT_IOCTL,
+                                                ctypes.byref(address), 8, None, 0,
+                                                ctypes.byref(returned), None))
+        finally:
+            dll.BluetoothFindRadioClose(find)
+            kernel32.CloseHandle(radio)
+    except Exception:
+        return False
 
 
 def _bt_clean_name(name: str) -> str:
@@ -2493,6 +2719,7 @@ class MediaWorker(QThread):
     state_changed = Signal(object)
     bluetooth_changed = Signal(object)
     weather_changed = Signal(object)
+    bt_notice = Signal(str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -2566,6 +2793,46 @@ class MediaWorker(QThread):
                 self._loop.call_soon_threadsafe(self._bt_wake.set)
             except RuntimeError:            # loop already closed during shutdown
                 pass
+
+    def disconnect_device(self, device):
+        """Drop a Bluetooth device from the UI thread."""
+        loop = self._loop
+        if loop is None or device is None:
+            return
+        try:
+            asyncio.run_coroutine_threadsafe(self._disconnect_device(device), loop)
+        except RuntimeError:            # loop already closed during shutdown
+            pass
+
+    async def _wait_bt_disconnected(self, mac: str) -> bool:
+        """Poll the radio until the link really is down (or the device is gone)."""
+        for attempt in range(10):
+            state = await asyncio.to_thread(bluetooth_link_state, mac)
+            if state is not True:
+                return True
+            if attempt == 3:            # some stacks reconnect on their own
+                await asyncio.to_thread(bluetooth_disconnect_audio, mac)
+            await asyncio.sleep(0.2)
+        return False
+
+    async def _disconnect_device(self, device):
+        dev_id = getattr(device, "id", "") or (device if isinstance(device, str) else "")
+        name = (getattr(device, "name", "") or "").strip() or "Device"
+        mac = (getattr(device, "mac", "") or bluetooth_mac_any(dev_id)).upper()
+        # Never let the driver call block the media/bluetooth event loop.
+        ok = await asyncio.to_thread(bluetooth_disconnect_audio, mac)
+        if ok and mac:
+            ok = await self._wait_bt_disconnected(mac)
+        elif mac:
+            # A link that is already down counts as done.
+            state = await asyncio.to_thread(bluetooth_link_state, mac)
+            ok = state is False
+        if ok:
+            self._detach_bt(mac)
+            self.bt_notice.emit(f"{name} disconnected \u00b7 still paired")
+        else:
+            self.bt_notice.emit(f"Couldn't disconnect {name}")
+        self.refresh_bluetooth()
 
     async def _weather_main(self):
         while not self._stop.is_set():
@@ -2730,7 +2997,8 @@ class MediaWorker(QThread):
                 continue
             key = cid or info.id
             if key not in unique or (unique[key][4] and not is_le):
-                unique[key] = (info.id, name, kind, cid, is_le)
+                unique[key] = (info.id, name, kind, cid, is_le,
+                               bluetooth_mac_any(info.id))
         if not unique:
             return []
 
@@ -2738,11 +3006,12 @@ class MediaWorker(QThread):
         models = await self._read_model_map()
 
         out = []
-        for dev_id, name, kind, cid, _ in list(unique.values())[:MAX_DEVICES]:
+        for dev_id, name, kind, cid, _, mac in list(unique.values())[:MAX_DEVICES]:
             manu, model = models.get(cid, ("", ""))
             out.append(BluetoothAudioDevice(
                 id=dev_id, name=name, dev_type=kind,
-                product=product_name(manu, model, name), battery=batteries.get(cid)))
+                product=product_name(manu, model, name), battery=batteries.get(cid),
+                mac=mac))
         return sorted(out, key=lambda d: d.name.lower())
 
     async def _scan_bluetooth_nodes(self) -> list[BluetoothAudioDevice]:
@@ -2831,7 +3100,8 @@ class MediaWorker(QThread):
             manu, model = models.get(cid, ("", ""))
             out.append(BluetoothAudioDevice(
                 id=cid or mac, name=name, dev_type=kind,
-                product=product_name(manu, model, name), battery=batteries.get(cid)))
+                product=product_name(manu, model, name), battery=batteries.get(cid),
+                mac=mac))
         return sorted(out, key=lambda d: d.name.lower())[:MAX_DEVICES]
 
     async def _read_battery_map(self) -> dict:
@@ -2953,8 +3223,682 @@ class MediaWorker(QThread):
 
 
 # --------------------------------------------------------------------------- #
+# Focus timer + AI agent progress
+# --------------------------------------------------------------------------- #
+def focus_clock(seconds: float) -> str:
+    """mm:ss, or h:mm:ss once a session runs past an hour."""
+    s = int(max(0.0, round(float(seconds))))
+    m, s = divmod(s, 60)
+    if m >= 60:
+        h, m = divmod(m, 60)
+        return f"{h}:{m:02d}:{s:02d}"
+    return f"{m}:{s:02d}"
+
+
+def play_chime() -> None:
+    """System chime for a finished session or an agent that needs an answer."""
+    try:
+        import winsound
+        winsound.MessageBeep(winsound.MB_ICONASTERISK)
+    except Exception:
+        pass
+
+
+class FocusTimer(QObject):
+    """One focus session at a time: presets, pause/resume, and a daily tally."""
+
+    changed = Signal()
+    finished = Signal()
+
+    PRESETS = (15, 25, 45, 60)
+    DEFAULT_MIN = 25
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._preset = self.DEFAULT_MIN
+        self._total = float(self._preset * 60)
+        self._left = self._total
+        self._deadline = 0.0
+        self._active = False
+        self._paused = False
+        self._done = 0
+        self._seconds = 0
+        self._load()
+        self._timer = QTimer(self)
+        self._timer.setInterval(200)
+        self._timer.timeout.connect(self._tick)
+
+    # --- state ---------------------------------------------------------- #
+    @property
+    def preset(self) -> int:
+        return self._preset
+
+    @property
+    def total(self) -> float:
+        return max(1.0, self._total)
+
+    @property
+    def remaining(self) -> float:
+        return max(0.0, self._left)
+
+    @property
+    def active(self) -> bool:
+        return self._active
+
+    @property
+    def paused(self) -> bool:
+        return self._paused
+
+    @property
+    def progress(self) -> float:
+        return clamp01(1.0 - self._left / self.total)
+
+    @property
+    def done(self) -> int:
+        return self._done
+
+    @property
+    def done_seconds(self) -> int:
+        return self._seconds
+
+    def label(self) -> str:
+        return focus_clock(self._left)
+
+    # --- control -------------------------------------------------------- #
+    def set_preset(self, minutes):
+        try:
+            minutes = int(minutes)
+        except (TypeError, ValueError):
+            return
+        if minutes not in self.PRESETS:
+            return
+        self._preset = minutes
+        if not self._active:
+            self._total = self._left = float(minutes * 60)
+        self.changed.emit()
+
+    def toggle(self) -> None:
+        if self._paused:
+            self.resume()
+        elif self._active:
+            self.pause()
+        else:
+            self.start()
+
+    def start(self) -> None:
+        self._total = float(self._preset * 60)
+        self._left = self._total
+        self._deadline = time.monotonic() + self._left
+        self._active = True
+        self._paused = False
+        self._timer.start()
+        self.changed.emit()
+
+    def pause(self) -> None:
+        if not self._active or self._paused:
+            return
+        self._left = max(0.0, self._deadline - time.monotonic())
+        self._paused = True
+        self._timer.stop()
+        self.changed.emit()
+
+    def resume(self) -> None:
+        if not (self._active and self._paused):
+            return
+        self._deadline = time.monotonic() + self._left
+        self._paused = False
+        self._timer.start()
+        self.changed.emit()
+
+    def add_minutes(self, minutes: int = 5) -> None:
+        if not self._active:
+            return
+        extra = float(minutes * 60)
+        self._left += extra
+        self._total += extra
+        if not self._paused:
+            self._deadline += extra
+        self.changed.emit()
+
+    def reset(self) -> None:
+        self._timer.stop()
+        self._active = self._paused = False
+        self._total = self._left = float(self._preset * 60)
+        self.changed.emit()
+
+    def _tick(self) -> None:
+        self._left = self._deadline - time.monotonic()
+        if self._left <= 0.0:
+            self._finish()
+            return
+        self.changed.emit()
+
+    def _finish(self) -> None:
+        self._timer.stop()
+        self._active = self._paused = False
+        self._left = 0.0
+        self._done += 1
+        self._seconds += int(round(self._total))
+        self._save()
+        self.changed.emit()
+        self.finished.emit()
+
+    # --- daily tally ---------------------------------------------------- #
+    def _load(self) -> None:
+        try:
+            data = json.loads(FOCUS_CFG.read_text(encoding="utf-8"))
+            if data.get("date") == dt.date.today().isoformat():
+                self._done = max(0, int(data.get("sessions", 0)))
+                self._seconds = max(0, int(data.get("seconds", 0)))
+        except Exception:
+            pass
+
+    def _save(self) -> None:
+        try:
+            FOCUS_CFG.parent.mkdir(parents=True, exist_ok=True)
+            FOCUS_CFG.write_text(json.dumps({
+                "date": dt.date.today().isoformat(),
+                "sessions": self._done,
+                "seconds": self._seconds,
+            }), encoding="utf-8")
+        except OSError:
+            pass
+
+
+_TOOL_WORDS = {
+    "Read": "Reading", "Write": "Writing", "Edit": "Editing", "MultiEdit": "Editing",
+    "NotebookEdit": "Editing", "Bash": "Running", "BashOutput": "Checking",
+    "Grep": "Searching", "Glob": "Scanning", "Task": "Delegating", "Agent": "Delegating",
+    "WebFetch": "Fetching", "WebSearch": "Searching the web", "TodoWrite": "Planning",
+    "AskUserQuestion": "Waiting for you", "shell": "Running", "apply_patch": "Editing",
+}
+
+_AGENT_ROOTS = (("Claude Code", (".claude", "projects")), ("Codex", (".codex", "sessions")))
+_AGENT_APPS = (
+    ("antigravity", "Antigravity"),
+    ("freebuff", "Freebuff"),
+    ("claude", "Claude Code"),
+    ("codex", "Codex"),
+    ("cursor", "Cursor"),
+    ("windsurf", "Windsurf"),
+    ("gemini", "Gemini"),
+    ("copilot", "Copilot"),
+)
+
+
+def _running_agent() -> tuple[str, str, bool] | None:
+    """(label, window title, is_foreground) for whichever agent app is open."""
+    try:
+        windows = _top_level_windows()
+        foreground = int(_user32.GetForegroundWindow())
+    except Exception:
+        return None
+    best = None
+    for hwnd, title, exe in windows:
+        stem = exe[:-4] if exe.endswith(".exe") else exe
+        for key, label in _AGENT_APPS:
+            if key in stem and (best is None or hwnd == foreground):
+                best = (hwnd == foreground, label, title)
+                break
+        if best is not None and best[0]:
+            break
+    return (best[1], best[2], best[0]) if best is not None else None
+
+
+def _agent_roots() -> list[tuple[str, Path]]:
+    home = Path.home()
+    return [(label, home.joinpath(*parts)) for label, parts in _AGENT_ROOTS]
+
+
+def _ago_text(seconds: float) -> str:
+    s = int(max(0.0, float(seconds)))
+    if s < 5:
+        return "just now"
+    if s < 60:
+        return f"{s}s ago"
+    m, s = divmod(s, 60)
+    if m < 60:
+        return f"{m}m ago"
+    h, m = divmod(m, 60)
+    return f"{h}h ago"
+
+
+class AgentWatcher(QThread):
+    """Follows the newest Claude Code / Codex session log so the island can show it working."""
+
+    state = Signal(object)
+
+    POLL_S = 1.0
+    BUSY_S = 22.0
+    RESCAN_S = 25.0
+    APP_SCAN_S = 3.0
+    MAX_FILES = 500
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._stop = threading.Event()
+        self._files: list[tuple[str, Path]] = []
+        self._scanned = 0.0
+        self._last = None
+        self._app: tuple[str, str, bool] | None = None
+        self._app_at = 0.0
+        self._busy_since = 0.0              # fallback run clock when the log has no timestamps
+
+    def stop(self):
+        self._stop.set()
+        self.wait(2500)
+
+    def run(self):
+        while not self._stop.is_set():
+            try:
+                snap = self._scan()
+            except Exception:
+                snap = None
+            if snap is not None and snap != self._last:
+                self._last = snap
+                self.state.emit(snap)
+            self._stop.wait(self.POLL_S)
+
+    def _agent_app(self):
+        """Any agent app that is open (Antigravity, Freebuff, …), cached briefly."""
+        now = time.monotonic()
+        if now - self._app_at >= self.APP_SCAN_S:
+            self._app_at = now
+            self._app = _running_agent()
+        return self._app
+
+    # --- discovery ------------------------------------------------------ #
+    def _collect(self, now: float):
+        if self._files and now - self._scanned < self.RESCAN_S:
+            return
+        self._scanned = now
+        found: list[tuple[str, Path]] = []
+        for label, root in _agent_roots():
+            if not root.is_dir():
+                continue
+            depth = len(root.parts)
+            for dirpath, dirnames, filenames in os.walk(root):
+                if len(found) >= self.MAX_FILES:
+                    break
+                here = Path(dirpath)
+                if len(here.parts) - depth > 4:
+                    dirnames[:] = []
+                    continue
+                for name in filenames:
+                    if name.endswith(".jsonl"):
+                        found.append((label, here / name))
+        self._files = found
+
+    def _scan(self):
+        self._collect(time.monotonic())
+        newest = None
+        for label, path in self._files:
+            try:
+                mtime = path.stat().st_mtime
+            except OSError:
+                continue
+            if newest is None or mtime > newest[0]:
+                newest = (mtime, label, path)
+        fresh = newest is not None and time.time() - newest[0] < self.BUSY_S
+        if not fresh and self._agent_app() is None:
+            self._busy_since = 0.0
+        if not fresh:
+            app = self._agent_app()
+            if app is not None:
+                label, title, focused = app
+                action = (title or "").strip()
+                if not action or action.lower() == label.lower():
+                    action = "Session open"
+                self._busy_since = self._busy_since or time.time()
+                return {"kind": label, "project": "", "branch": "", "action": action,
+                        "detail": "", "busy": True, "waiting": False,
+                        "age": 0.0, "steps": [], "app": True,
+                        "foreground": bool(focused), "title": "", "file": "",
+                        "diff": None, "phase": -1,
+                        "elapsed": time.time() - self._busy_since}
+        if newest is None:
+            return {"kind": "", "project": "", "branch": "", "action": "", "detail": "",
+                    "busy": False, "waiting": False, "age": 0.0, "steps": []}
+        mtime, label, path = newest
+        age = max(0.0, time.time() - mtime)
+        info = self._parse(path)
+        busy = age < self.BUSY_S
+        now = time.time()
+        started = float(info.pop("started", 0.0) or 0.0)
+        if busy and not self._busy_since:
+            self._busy_since = now
+        elif not busy:
+            self._busy_since = 0.0
+        if not started and busy:
+            started = self._busy_since
+        end = now if busy else mtime
+        elapsed = max(0.0, min(end - started, 99 * 3600.0)) if started else 0.0
+        info.update({"kind": label, "age": age, "busy": busy, "elapsed": elapsed})
+        return info
+
+    # --- parsing -------------------------------------------------------- #
+    @staticmethod
+    def _tail(path: Path, limit: int = 90) -> list[dict]:
+        with path.open("rb") as fh:
+            fh.seek(0, os.SEEK_END)
+            size = fh.tell()
+            fh.seek(max(0, size - 120_000))
+            raw = fh.read()
+        out: list[dict] = []
+        for line in raw.splitlines()[-limit:]:
+            try:
+                item = json.loads(line.decode("utf-8", "replace"))
+            except Exception:
+                continue
+            if isinstance(item, dict):
+                out.append(item)
+        return out
+
+    @staticmethod
+    def _blocks(entry: dict) -> list[dict]:
+        blocks = []
+        message = entry.get("message")
+        if isinstance(message, dict) and isinstance(message.get("content"), list):
+            blocks = message["content"]
+        elif isinstance(entry.get("content"), list):
+            blocks = entry["content"]
+        return [b for b in blocks if isinstance(b, dict)]
+
+    @classmethod
+    def _actions(cls, entry: dict):
+        for block in cls._blocks(entry):
+            if block.get("type") not in ("tool_use", "function_call"):
+                continue
+            name = str(block.get("name") or block.get("tool_name") or "Tool")
+            payload = block.get("input") or block.get("arguments") or {}
+            if isinstance(payload, str):
+                try:
+                    payload = json.loads(payload)
+                except Exception:
+                    payload = {"value": payload}
+            if not isinstance(payload, dict):
+                payload = {}
+            arg = (payload.get("file_path") or payload.get("path") or payload.get("command")
+                   or payload.get("pattern") or payload.get("query") or payload.get("description")
+                   or payload.get("prompt") or payload.get("value") or "")
+            yield name, str(arg)
+
+    _PHASE = {"Read": 0, "Grep": 0, "Glob": 0, "WebFetch": 0, "WebSearch": 0,
+              "Task": 0, "Agent": 0, "TodoWrite": 0,
+              "Edit": 1, "MultiEdit": 1, "Write": 1, "NotebookEdit": 1, "apply_patch": 1,
+              "Bash": 2, "BashOutput": 2, "shell": 2}
+
+    @staticmethod
+    def _stamp(entry: dict) -> float:
+        raw = entry.get("timestamp")
+        try:
+            if isinstance(raw, (int, float)):
+                return float(raw) / (1000.0 if raw > 1e11 else 1.0)
+            return dt.datetime.fromisoformat(str(raw).replace("Z", "+00:00")).timestamp()
+        except Exception:
+            return 0.0
+
+    @classmethod
+    def _user_text(cls, entry: dict) -> str:
+        """The prompt the person typed (tool results and system tags are skipped)."""
+        message = entry.get("message")
+        if not (entry.get("type") == "user"
+                or (isinstance(message, dict) and message.get("role") == "user")):
+            return ""
+        content = message.get("content") if isinstance(message, dict) else entry.get("content")
+        if isinstance(content, list):
+            content = " ".join(str(b.get("text", "")) for b in content
+                               if isinstance(b, dict) and b.get("type") in ("text", "input_text"))
+        text = " ".join(str(content or "").split())
+        return "" if (not text or text.startswith("<")) else text[:120]
+
+    @classmethod
+    def _edits(cls, entry: dict):
+        """(file, old, new) for every edit / write / patch tool call in an entry."""
+        for block in cls._blocks(entry):
+            if block.get("type") not in ("tool_use", "function_call"):
+                continue
+            name = str(block.get("name") or block.get("tool_name") or "")
+            payload = block.get("input") or block.get("arguments") or {}
+            if isinstance(payload, str):
+                try:
+                    payload = json.loads(payload)
+                except Exception:
+                    payload = {"value": payload}
+            if not isinstance(payload, dict):
+                continue
+            path = str(payload.get("file_path") or payload.get("path") or "")
+            if name in ("Edit", "MultiEdit"):
+                items = payload.get("edits") if name == "MultiEdit" else [payload]
+                for item in (items or [])[:1]:
+                    if isinstance(item, dict):
+                        yield path, str(item.get("old_string") or ""), str(item.get("new_string") or "")
+            elif name == "Write":
+                yield path, "", str(payload.get("content") or "")
+            elif name == "apply_patch":
+                text = str(payload.get("input") or payload.get("value") or "")
+                file = re.search(r"\*\*\* (?:Update|Add) File: (.+)", text)
+                minus = [l[1:] for l in text.splitlines() if l.startswith("-") and not l.startswith("---")]
+                plus = [l[1:] for l in text.splitlines() if l.startswith("+") and not l.startswith("+++")]
+                yield (file.group(1).strip() if file else path), "\n".join(minus), "\n".join(plus)
+
+    @staticmethod
+    def _first_diff(old: str, new: str) -> dict:
+        ol, nl = old.splitlines(), new.splitlines()
+        o = n = ""
+        line = 1
+        for i in range(max(len(ol), len(nl))):
+            a = ol[i] if i < len(ol) else None
+            b = nl[i] if i < len(nl) else None
+            if a != b:
+                o, n, line = (a or ""), (b or ""), i + 1
+                break
+        else:
+            o, n = (ol[0] if ol else ""), (nl[0] if nl else "")
+        clip = lambda s: s.expandtabs(2).rstrip()[:110]
+        return {"old": clip(o) if old else "", "new": clip(n), "line": line,
+                "minus": len(ol), "plus": len(nl)}
+
+    @staticmethod
+    def _short(arg: str) -> str:
+        arg = (arg or "").strip().replace("\n", " ")
+        if not arg:
+            return ""
+        if "/" in arg or "\\" in arg:
+            arg = os.path.basename(arg.rstrip("/\\")) or arg
+        return arg if len(arg) <= 46 else arg[:43].rstrip() + "…"
+
+    @classmethod
+    def _parse(cls, path: Path) -> dict:
+        entries = cls._tail(path)
+        project = branch = ""
+        steps: list[tuple[str, str]] = []
+        waiting = False
+        title, started, phase, edit = "", 0.0, -1, None
+        for entry in entries:
+            prompt = cls._user_text(entry)
+            if prompt:                                     # a new run starts here
+                title, started, phase, edit = prompt, cls._stamp(entry), -1, None
+            for file, old, new in cls._edits(entry):
+                edit = (file, cls._first_diff(old, new))
+            cwd = entry.get("cwd")
+            if cwd and not project:
+                project = Path(str(cwd)).name or str(cwd)
+            if entry.get("gitBranch") and not branch:
+                branch = str(entry["gitBranch"])
+            for name, arg in cls._actions(entry):
+                if name == "AskUserQuestion":
+                    waiting = True
+                phase = max(phase, cls._PHASE.get(name, -1))
+                steps.append((name, arg))
+        action, detail = "", ""
+        if steps:
+            name, arg = steps[-1]
+            action = _TOOL_WORDS.get(name, name)
+            detail = cls._short(arg)
+        recent = []
+        for name, arg in steps[-3:][::-1]:
+            text = f"{_TOOL_WORDS.get(name, name)} {cls._short(arg)}".strip()
+            if text and text not in recent:
+                recent.append(text)
+        return {"project": project, "branch": branch, "action": action, "detail": detail,
+                "waiting": waiting, "steps": recent, "title": title, "started": started,
+                "phase": phase, "file": os.path.basename(edit[0]) if edit else "",
+                "diff": edit[1] if edit else None}
+
+
+# --------------------------------------------------------------------------- #
 # Motion helpers
 # --------------------------------------------------------------------------- #
+# --------------------------------------------------------------------------- #
+# Lyrics (LRCLIB, cached locally)
+# --------------------------------------------------------------------------- #
+_LRC_TIME_RX = re.compile(r"\[(\d{1,3}):(\d{1,2}(?:[.:]\d{1,3})?)\]")
+
+
+def parse_lrc(text: str) -> list[tuple[float, str]]:
+    """[(seconds, line)] from an LRC file, sorted and de-duplicated."""
+    out: list[tuple[float, str]] = []
+    for raw in (text or "").splitlines():
+        stamps = list(_LRC_TIME_RX.finditer(raw))
+        if not stamps:
+            continue
+        body = _LRC_TIME_RX.sub("", raw).strip()
+        if not body:
+            continue
+        for match in stamps:
+            seconds = int(match.group(1)) * 60 + float(match.group(2).replace(":", "."))
+            out.append((seconds, body))
+    out.sort(key=lambda item: item[0])
+    return out
+
+
+def lyrics_line_index(lines, position: float) -> int:
+    """Index of the line that is playing at `position` (-1 before the first)."""
+    lo, hi = 0, len(lines)
+    while lo < hi:
+        mid = (lo + hi) // 2
+        if float(lines[mid][0]) <= position:
+            lo = mid + 1
+        else:
+            hi = mid
+    return lo - 1
+
+
+def _lyrics_cache() -> dict:
+    try:
+        data = json.loads(LYRICS_CFG.read_text("utf-8"))
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def _lyrics_cache_store(key: str, payload: dict) -> None:
+    try:
+        data = _lyrics_cache()
+        data[key] = {k: payload.get(k) for k in ("status", "lines", "plain", "source")}
+        for old in list(data)[:-80]:
+            data.pop(old, None)
+        LYRICS_CFG.parent.mkdir(parents=True, exist_ok=True)
+        LYRICS_CFG.write_text(json.dumps(data, ensure_ascii=False), "utf-8")
+    except Exception:
+        pass
+
+
+class LyricsFetcher(QThread):
+    """Looks a track up on LRCLIB once, off the UI thread, and caches the result."""
+
+    ready = Signal(object)
+
+    def __init__(self, key: str, title: str, artist: str, album: str = "",
+                 duration: float = 0.0, parent=None):
+        super().__init__(parent)
+        self._key, self._title, self._artist = key, title, artist
+        self._album, self._duration = album, duration
+
+    def run(self):
+        cached = _lyrics_cache().get(self._key)
+        if isinstance(cached, dict) and cached.get("status") == "ok":
+            cached = dict(cached)
+            cached["key"] = self._key
+            self.ready.emit(cached)
+            return
+        try:
+            payload = self._lookup()
+        except Exception:
+            payload = {"status": "none", "lines": [], "plain": "", "source": "LRCLIB"}
+        payload["key"] = self._key
+        if payload.get("status") == "ok":
+            _lyrics_cache_store(self._key, payload)
+        self.ready.emit(payload)
+
+    def _lookup(self) -> dict:
+        if not self._title:
+            return {"status": "none", "lines": [], "plain": "", "source": "LRCLIB"}
+        query = urllib.parse.urlencode({
+            "artist_name": self._artist or "", "track_name": self._title,
+            "album_name": self._album or "", "duration": int(self._duration or 0),
+        })
+        candidates: list[dict] = []
+        try:
+            data = _http_json("https://lrclib.net/api/get?" + query, 3.0)
+            if isinstance(data, dict):
+                candidates.append(data)
+        except Exception:
+            pass
+        if self.isInterruptionRequested():
+            return {"status": "none", "lines": [], "plain": "", "source": "LRCLIB"}
+        if not any((c.get("syncedLyrics") or c.get("plainLyrics")) for c in candidates):
+            try:
+                found = _http_json("https://lrclib.net/api/search?" + urllib.parse.urlencode(
+                    {"track_name": self._title, "artist_name": self._artist or ""}), 3.0)
+            except Exception:
+                found = []
+            if isinstance(found, list):
+                candidates += [c for c in found[:5] if isinstance(c, dict)]
+        for cand in candidates:
+            synced = (cand.get("syncedLyrics") or "").strip()
+            plain = (cand.get("plainLyrics") or "").strip()
+            lines = parse_lrc(synced)
+            if lines or plain:
+                return {"status": "ok", "lines": [list(x) for x in lines],
+                        "plain": plain, "source": "LRCLIB"}
+        return {"status": "none", "lines": [], "plain": "", "source": "LRCLIB"}
+
+
+# --------------------------------------------------------------------------- #
+# System stats (for the expandable system panel)
+# --------------------------------------------------------------------------- #
+class _MemoryStatusEx(ctypes.Structure):
+    _fields_ = [("dwLength", wintypes.DWORD), ("dwMemoryLoad", wintypes.DWORD),
+                ("ullTotalPhys", ctypes.c_ulonglong), ("ullAvailPhys", ctypes.c_ulonglong),
+                ("ullTotalPageFile", ctypes.c_ulonglong),
+                ("ullAvailPageFile", ctypes.c_ulonglong),
+                ("ullTotalVirtual", ctypes.c_ulonglong),
+                ("ullAvailVirtual", ctypes.c_ulonglong),
+                ("ullAvailExtendedVirtual", ctypes.c_ulonglong)]
+
+
+def _system_stats() -> dict:
+    stats: dict = {}
+    try:
+        mem = _MemoryStatusEx()
+        mem.dwLength = ctypes.sizeof(mem)
+        if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(mem)):
+            total = mem.ullTotalPhys / (1024 ** 3)
+            used = (mem.ullTotalPhys - mem.ullAvailPhys) / (1024 ** 3)
+            stats.update(ram_used=used, ram_total=total, ram_pct=int(mem.dwMemoryLoad))
+    except Exception:
+        pass
+    try:
+        fn = ctypes.windll.kernel32.GetTickCount64
+        fn.restype = ctypes.c_ulonglong
+        stats["uptime"] = fn() / 1000.0
+    except Exception:
+        pass
+    return stats
+
+
 def clamp01(v: float) -> float:
     return 0.0 if v < 0.0 else 1.0 if v > 1.0 else v
 
@@ -4204,6 +5148,1868 @@ class RingGauge(QWidget, _Reveal):
         p.drawText(r, Qt.AlignCenter, ch)
 
 
+def _page_card(p: QPainter, rect: QRectF, alpha: int = 26) -> None:
+    """The frosted sub-card every island page sits on."""
+    p.save()
+    p.setPen(Qt.NoPen)
+    for i in range(6, 0, -1):
+        p.setBrush(QColor(0, 0, 0, 4 + (6 - i) * 2))
+        p.drawRoundedRect(rect.adjusted(-i * 0.5, i * 0.2, i * 0.5, i * 1.1), 20 + i, 20 + i)
+    grad = QLinearGradient(rect.topLeft(), rect.bottomLeft())
+    grad.setColorAt(0.0, QColor(255, 255, 255, alpha + 12))
+    grad.setColorAt(1.0, QColor(255, 255, 255, max(6, alpha - 8)))
+    p.setBrush(grad)
+    p.setPen(QPen(QColor(255, 255, 255, 46), 1.0))
+    p.drawRoundedRect(rect.adjusted(0.5, 0.5, -0.5, -0.5), 20, 20)
+    p.restore()
+
+
+class FocusPage(QWidget, _Reveal):
+    """Focus timer: countdown ring, presets and today's tally."""
+
+    preset_changed = Signal(object)
+    primary_clicked = Signal()
+    reset_clicked = Signal()
+
+    def __init__(self):
+        super().__init__()
+        self.setFixedSize(W, H)
+        self._c1, self._c2 = QColor(DEFAULT_TINT), QColor(DEFAULT_TINT_2)
+        self._state = {"total": 1500.0, "left": 1500.0, "active": False, "paused": False,
+                       "done": 0, "seconds": 0, "preset": FocusTimer.DEFAULT_MIN}
+        self._sweep = 1.0
+        self._t = 0.0
+
+        self.presets = SegmentedControl([(m, f"{m}m") for m in FocusTimer.PRESETS], 176, 24)
+        self.presets.setParent(self)
+        self.presets.move(136, 109)
+        self.presets.changed.connect(self.preset_changed)
+
+        self.primary = ActionButton("play", "Start focus", "primary")
+        self.primary.setFixedSize(136, 28)
+        self.primary.setParent(self)
+        self.primary.move(330, 56)
+        self.primary.clicked.connect(self.primary_clicked)
+
+        self.reset = ActionButton("reset", "Reset", "plain")
+        self.reset.setFixedSize(96, 28)
+        self.reset.setParent(self)
+        self.reset.move(330, 94)
+        self.reset.clicked.connect(self.reset_clicked)
+
+        self._pulse = QTimer(self)
+        self._pulse.setInterval(33)
+        self._pulse.timeout.connect(self._tick)
+
+    def set_tints(self, c1: QColor, c2: QColor):
+        self._c1, self._c2 = QColor(c1), QColor(c2)
+        self.update()
+
+    def set_state(self, focus):
+        self._state = {"total": focus.total, "left": focus.remaining,
+                       "active": focus.active, "paused": focus.paused,
+                       "done": focus.done, "seconds": focus.done_seconds,
+                       "preset": focus.preset}
+        running = focus.active and not focus.paused
+        self.primary.set_label("Pause" if running else
+                               ("Resume" if focus.paused else "Start focus"))
+        self.primary.set_icon("pause" if running else "play")
+        self.presets.set_value(focus.preset)
+        self.update()
+
+    def celebrate(self):
+        self._sweep = 0.0
+        self.update()
+
+    def showEvent(self, e):
+        self._pulse.start()
+        super().showEvent(e)
+
+    def hideEvent(self, e):
+        self._pulse.stop()
+        super().hideEvent(e)
+
+    def _tick(self):
+        self._t += 0.033
+        if self._sweep < 1.0:
+            self._sweep = min(1.0, self._sweep + 0.033 / 0.9)
+        self.update()
+
+    def paintEvent(self, _e):
+        rv = self._rv
+        if rv <= 0.004:
+            return
+        p = QPainter(self)
+        p.setRenderHints(QPainter.Antialiasing | QPainter.TextAntialiasing
+                         | QPainter.SmoothPixmapTransform)
+        st = self._state
+        p.setOpacity(rv)
+        _page_card(p, QRectF(12, 42, 618, 100))
+
+        total = max(1.0, float(st["total"]))
+        left = max(0.0, float(st["left"]))
+        frac = clamp01(left / total)
+        paused = bool(st["paused"])
+        accent = QColor(255, 178, 92) if paused else pastel(self._c2, 0.8)
+
+        disc = QRectF(24, 44, 96, 96)
+        arc = disc.adjusted(7.0, 7.0, -7.0, -7.0)
+        p.setPen(Qt.NoPen)
+        p.setBrush(QColor(10, 13, 22, 150))
+        p.drawEllipse(disc)
+        p.setBrush(Qt.NoBrush)
+        p.setPen(QPen(QColor(255, 255, 255, 40), 3.2))
+        p.drawEllipse(arc)
+        if frac > 0.002:
+            p.setPen(QPen(accent, 3.2, Qt.SolidLine, Qt.RoundCap))
+            p.drawArc(arc, 90 * 16, int(-360 * 16 * frac))
+
+        p.setFont(ui_font(25, QFont.Weight.Bold, True))
+        p.setPen(QColor(0, 0, 0, 150))
+        p.drawText(disc.translated(0, -6.0), Qt.AlignCenter, str(st["preset"]))
+        p.setPen(QColor(255, 255, 255, 246))
+        p.drawText(disc.translated(0, -7.0), Qt.AlignCenter, str(st["preset"]))
+        p.setFont(ui_font(7, QFont.Weight.Bold, True, 1.4))
+        p.setPen(QColor(255, 255, 255, 142))
+        p.drawText(disc.translated(0, 22.0), Qt.AlignCenter, "MIN")
+
+        p.setFont(ui_font(9, QFont.Weight.DemiBold, True, 1.7))
+        p.setPen(QColor(255, 255, 255, 196))
+        p.drawText(QRectF(136, 47, 210, 14), Qt.AlignLeft | Qt.AlignVCenter, "FOCUS SESSION")
+
+        big = focus_clock(left)
+        p.setFont(ui_font(30, QFont.Weight.Bold, True))
+        p.setPen(QColor(0, 0, 0, 120))
+        p.drawText(QRectF(136, 58, 200, 38).translated(0, 1.5),
+                   Qt.AlignLeft | Qt.AlignVCenter, big)
+        p.setPen(QColor(255, 255, 255, 248))
+        p.drawText(QRectF(136, 58, 200, 38), Qt.AlignLeft | Qt.AlignVCenter, big)
+
+        p.setFont(ui_font(9, QFont.Weight.Medium, False, 0.2))
+        p.setPen(QColor(255, 255, 255, 156))
+        note = ("Paused · pick up where you left off" if paused else
+                "Running · the pill keeps the countdown" if st["active"] else
+                "Pick a length, then start")
+        p.drawText(QRectF(136, 92, 320, 13), Qt.AlignLeft | Qt.AlignVCenter,
+                   p.fontMetrics().elidedText(note, Qt.ElideRight, 318))
+
+        box = QRectF(478, 50, 140, 86)
+        p.setBrush(QColor(255, 255, 255, 14))
+        p.setPen(QPen(QColor(255, 255, 255, 38), 1.0))
+        p.drawRoundedRect(box, 16, 16)
+        p.setFont(ui_font(9, QFont.Weight.DemiBold, True, 1.7))
+        p.setPen(QColor(255, 255, 255, 190))
+        p.drawText(QRectF(box.x() + 14, box.y() + 9, box.width() - 28, 14),
+                   Qt.AlignLeft | Qt.AlignVCenter, "TODAY")
+        p.setFont(ui_font(22, QFont.Weight.Bold, True))
+        p.setPen(QColor(0, 0, 0, 120))
+        p.drawText(QRectF(box.x() + 14, box.y() + 21, 60, 30).translated(0, 1.0),
+                   Qt.AlignLeft | Qt.AlignVCenter, str(st["done"]))
+        p.setPen(QColor(255, 255, 255, 246))
+        p.drawText(QRectF(box.x() + 14, box.y() + 21, 60, 30),
+                   Qt.AlignLeft | Qt.AlignVCenter, str(st["done"]))
+        p.setFont(ui_font(9, QFont.Weight.Medium, False, 0.3))
+        p.setPen(QColor(255, 255, 255, 150))
+        p.drawText(QRectF(box.x() + 46, box.y() + 30, 80, 16),
+                   Qt.AlignLeft | Qt.AlignVCenter, "sessions")
+        mins = int(st["seconds"]) // 60
+        focused = f"{mins // 60}h {mins % 60:02d}m" if mins >= 60 else f"{mins} min"
+        p.setFont(ui_font(10, QFont.Weight.DemiBold, True, 0.4))
+        p.setPen(with_alpha(pastel(self._c2, 0.9), 235))
+        p.drawText(QRectF(box.x() + 14, box.y() + 54, box.width() - 28, 18),
+                   Qt.AlignLeft | Qt.AlignVCenter, focused)
+
+        if 0.0 < self._sweep < 1.0:
+            s = ease_out_cubic(self._sweep)
+            x0 = 12 + 606 * s
+            band = QLinearGradient(x0 - 60, 0, x0 + 60, 0)
+            band.setColorAt(0.0, QColor(255, 255, 255, 0))
+            band.setColorAt(0.5, QColor(255, 255, 255, int(48 * math.sin(math.pi * self._sweep))))
+            band.setColorAt(1.0, QColor(255, 255, 255, 0))
+            p.setPen(Qt.NoPen)
+            p.setBrush(band)
+            p.drawRoundedRect(QRectF(12, 42, 618, 100), 20, 20)
+
+
+def mono_font(px: int, weight=QFont.Weight.Medium, spacing: float = 0.0) -> QFont:
+    f = QFont()
+    f.setFamilies(["Cascadia Mono", "Cascadia Code", "Consolas", "Courier New"])
+    f.setPixelSize(px)
+    f.setWeight(weight)
+    f.setStyleStrategy(QFont.PreferAntialias)
+    if spacing:
+        f.setLetterSpacing(QFont.AbsoluteSpacing, spacing)
+    return f
+
+
+class AgentPage(QWidget, _Reveal):
+    """Live agent view: eyes + run clock, the task, the latest diff, and a phase bar."""
+
+    PHASES = ("READ", "EDIT", "TEST", "DONE")
+    LEFT_CX = 86.0
+    COL_X, COL_W = 168.0, 456.0
+    _STATUS = {"Editing": "EDITING", "Writing": "EDITING", "Reading": "READING",
+               "Scanning": "READING", "Searching": "READING", "Running": "TESTING",
+               "Checking": "TESTING", "Planning": "PLANNING",
+               "Waiting for you": "NEEDS YOU"}
+
+    def __init__(self):
+        super().__init__()
+        self.setFixedSize(W, H)
+        self._c1, self._c2 = QColor(DEFAULT_TINT), QColor(DEFAULT_TINT_2)
+        self._state = {"kind": "", "project": "", "branch": "", "action": "", "detail": "",
+                       "busy": False, "waiting": False, "age": 0.0, "steps": [],
+                       "title": "", "file": "", "diff": None, "phase": -1, "elapsed": 0.0}
+        self._got = time.monotonic()
+        self._prev = self._got
+        self._t = 0.0
+        self._seg = [0.0] * 4
+        self._diff_key, self._diff_t = None, 1.0
+        self._title, self._title_old, self._title_t = "", "", 1.0
+        self._pulse = QTimer(self)
+        self._pulse.setInterval(16)
+        self._pulse.timeout.connect(self._tick)
+
+    # ------------------------------------------------------------------ api #
+    def set_tints(self, c1: QColor, c2: QColor):
+        self._c1, self._c2 = QColor(c1), QColor(c2)
+        self.update()
+
+    def set_state(self, state: dict):
+        self._state = dict(state or {})
+        self._got = time.monotonic()
+        title = self._headline()
+        if title != self._title:
+            self._title_old, self._title, self._title_t = self._title, title, 0.0
+        diff = self._state.get("diff")
+        key = (self._state.get("file"), diff.get("old"), diff.get("new")) if diff else None
+        if key != self._diff_key:
+            self._diff_key = key
+            self._diff_t = 0.0 if key else 1.0
+        self.update()
+
+    def showEvent(self, e):
+        self._prev = time.monotonic()
+        self._pulse.start()
+        super().showEvent(e)
+
+    def hideEvent(self, e):
+        self._pulse.stop()
+        super().hideEvent(e)
+
+    # --------------------------------------------------------------- motion #
+    def _headline(self) -> str:
+        st = self._state
+        if not st.get("kind"):
+            return "No agent detected"
+        return (str(st.get("title") or "").strip()
+                or str(st.get("project") or "").strip() or "Waiting for the next task")
+
+    def _targets(self) -> list[float]:
+        st = self._state
+        if not st.get("kind"):
+            return [0.0] * 4
+        if not st.get("busy"):
+            return [1.0] * 4
+        if st.get("app"):
+            return [0.0] * 4
+        phase = max(0, min(2, int(st.get("phase", -1))))
+        return [1.0 if i < phase else (0.5 if i == phase else 0.0) for i in range(3)] + [0.0]
+
+    def _tick(self):
+        now = time.monotonic()
+        dt_ = min(0.05, max(0.0, now - self._prev))
+        self._prev = now
+        self._t += dt_
+        k = 1.0 - math.exp(-dt_ * 5.5)
+        for i, goal in enumerate(self._targets()):
+            self._seg[i] += (goal - self._seg[i]) * k
+        self._diff_t = min(1.0, self._diff_t + dt_ / 0.5)
+        self._title_t = min(1.0, self._title_t + dt_ / 0.42)
+        self.update()
+
+    def _elapsed(self) -> float:
+        st = self._state
+        extra = (time.monotonic() - self._got) if st.get("busy") else 0.0
+        return float(st.get("elapsed") or 0.0) + extra
+
+    # ------------------------------------------------------------- painting #
+    def _accent(self, kind: str, waiting: bool) -> QColor:
+        if waiting:
+            return QColor(255, 178, 92)
+        if "claude" in kind.lower():
+            return QColor(238, 134, 74)
+        return pastel(self._c2, 0.85, 1.0) if kind else pastel(self._c1, 0.55, 1.0)
+
+    @staticmethod
+    def _shadowed(p, rect, flags, text, color, lift: float = 1.0):
+        p.setPen(QColor(0, 0, 0, 110))
+        p.drawText(rect.translated(0, lift), flags, text)
+        p.setPen(color)
+        p.drawText(rect, flags, text)
+
+    def paintEvent(self, _e):
+        rv = self._rv
+        if rv <= 0.004:
+            return
+        p = QPainter(self)
+        p.setRenderHints(QPainter.Antialiasing | QPainter.TextAntialiasing
+                         | QPainter.SmoothPixmapTransform)
+        st = self._state
+        kind = str(st.get("kind") or "")
+        busy = bool(st.get("busy"))
+        waiting = bool(st.get("waiting")) and busy
+        accent = self._accent(kind, waiting)
+        a_left, a_mid, a_low = seg(rv, 0.0, 0.55), seg(rv, 0.12, 0.55), seg(rv, 0.28, 0.55)
+
+        # warm wash across the whole island, like the reference
+        p.save()
+        p.setClipPath(notch_path(QRectF(0, 0, W, H), BOTTOM_RADIUS))
+        wash = QLinearGradient(0, H, W * 0.85, 0)
+        wash.setColorAt(0.0, with_alpha(accent, int(78 * rv)))
+        wash.setColorAt(0.55, with_alpha(accent, int(22 * rv)))
+        wash.setColorAt(1.0, with_alpha(accent, 0))
+        p.fillRect(QRectF(0, 0, W, H), wash)
+        p.restore()
+
+        self._paint_left(p, kind, busy, waiting, accent, a_left)
+        self._paint_task(p, kind, accent, a_mid)
+        self._paint_phases(p, kind, busy, accent, a_low)
+
+    # --- left column: eyes, clock, status ------------------------------------ #
+    def _paint_left(self, p, kind, busy, waiting, accent, a):
+        st, t, cx = self._state, self._t, self.LEFT_CX
+        p.save()
+        p.setOpacity(self._rv * a)
+        p.translate(0, (1.0 - a) * 8.0)
+
+        cyc = t % 4.4
+        blink = math.sin(math.pi * cyc / 0.2) if cyc < 0.2 else 0.0
+        asleep = not kind
+        height = 5.0 if asleep else 38.0 * (1.0 - 0.88 * blink)
+        gaze = 0.0 if asleep else (3.2 * math.sin(t * 0.8) if busy else 1.2 * math.sin(t * 0.5))
+        bob = -2.5 * abs(math.sin(t * 3.2)) if waiting else 0.0
+        mid_y = 64.0 + bob
+
+        glow = QRadialGradient(QPointF(cx, mid_y), 54)
+        glow.setColorAt(0.0, with_alpha(accent, 96 if busy else 44))
+        glow.setColorAt(1.0, with_alpha(accent, 0))
+        p.setPen(Qt.NoPen)
+        p.setBrush(glow)
+        p.drawEllipse(QPointF(cx, mid_y), 54, 54)
+
+        for sign in (-1, 1):
+            r = QRectF(cx + sign * 19 - 13 + gaze, mid_y - height / 2, 26, height)
+            g = QLinearGradient(0, r.top(), 0, r.bottom())
+            g.setColorAt(0.0, QColor(255, 238, 226, 128 if asleep else 238))
+            g.setColorAt(1.0, QColor(255, 214, 190, 90 if asleep else 196))
+            p.setBrush(g)
+            p.setPen(QPen(QColor(255, 255, 255, 70), 1.0))
+            p.drawRoundedRect(r, 13, min(13.0, height / 2))
+
+        clock = focus_clock(self._elapsed())
+        p.setFont(ui_font(24, QFont.Weight.Bold, True))
+        self._shadowed(p, QRectF(cx - 64, 88, 128, 28), Qt.AlignCenter, clock,
+                       QColor(255, 255, 255, 250), 1.5)
+
+        if not kind:
+            label = "NO AGENT"
+        elif waiting:
+            label = "NEEDS YOU"
+        elif not busy:
+            label = "DONE"
+        elif st.get("app"):
+            label = "OPEN"
+        else:
+            label = self._STATUS.get(str(st.get("action") or ""),
+                                    str(st.get("action") or "WORKING").upper())
+        p.setFont(ui_font(8, QFont.Weight.Bold, False, 1.5))
+        tw = p.fontMetrics().horizontalAdvance(label)
+        x0 = cx - (7 + 6 + tw) / 2.0
+        p.setPen(Qt.NoPen)
+        p.setBrush(with_alpha(accent, 235 if busy else 120))
+        p.drawRoundedRect(QRectF(x0, 124.5, 6, 6), 1.5, 1.5)
+        p.setPen(QColor(255, 255, 255, 196))
+        p.drawText(QRectF(x0 + 13, 120, tw + 4, 14), Qt.AlignLeft | Qt.AlignVCenter, label)
+        p.restore()
+
+    # --- right column: task + diff card -------------------------------------- #
+    def _paint_task(self, p, kind, accent, a):
+        st = self._state
+        x, w = self.COL_X, self.COL_W
+        p.save()
+        p.setOpacity(self._rv * a)
+        p.translate(0, (1.0 - a) * 7.0)
+
+        e = ease_out_cubic(self._title_t)
+        p.setFont(ui_font(13, QFont.Weight.DemiBold, True, 0.1))
+        fm = p.fontMetrics()
+        for text, alpha, dy in ((self._title_old, 1.0 - e, -6.0 * e),
+                                (self._title, e, 6.0 * (1.0 - e))):
+            if alpha <= 0.01 or not text:
+                continue
+            p.setOpacity(self._rv * a * alpha)
+            p.setPen(QColor(255, 255, 255, 238))
+            p.drawText(QRectF(x, 40 + dy, w, 18), Qt.AlignLeft | Qt.AlignVCenter,
+                       fm.elidedText(text, Qt.ElideRight, int(w)))
+        p.setOpacity(self._rv * a)
+
+        card = QRectF(x, 61.5, w, 52)
+        p.setBrush(QColor(8, 10, 16, 118))
+        p.setPen(QPen(QColor(255, 255, 255, 36), 1.0))
+        p.drawRoundedRect(card, 13, 13)
+
+        diff = st.get("diff")
+        file = str(st.get("file") or "")
+        if diff:
+            head = (file or "CHANGE").upper()
+            rows = []
+            if diff.get("old"):
+                rows.append(("del", diff.get("line", 1), diff["old"]))
+            if diff.get("new"):
+                rows.append(("add", diff.get("line", 1), diff["new"]))
+            plus, minus = int(diff.get("plus", 0)), int(diff.get("minus", 0))
+        else:
+            steps = [str(s) for s in (st.get("steps") or [])][:2]
+            head = "ACTIVITY" if steps else ("STANDBY" if kind else "AGENT")
+            rows = [("info", 0, s) for s in steps] or [("info", 0,
+                    "Waiting for the first change" if kind
+                    else "Start Claude Code or Codex to see edits here")]
+            plus = minus = 0
+
+        p.setFont(mono_font(8, QFont.Weight.Bold, 0.9))
+        p.setPen(QColor(255, 255, 255, 150))
+        p.drawText(QRectF(x + 13, 63, w * 0.6, 15), Qt.AlignLeft | Qt.AlignVCenter,
+                   p.fontMetrics().elidedText(head, Qt.ElideRight, int(w * 0.6)))
+        if diff:
+            p.setFont(mono_font(8, QFont.Weight.Bold))
+            sub_w = p.fontMetrics().horizontalAdvance(f"-{minus}")
+            p.setPen(QColor(255, 118, 118, 235))
+            p.drawText(QRectF(card.right() - 13 - sub_w, 63, sub_w + 2, 15),
+                       Qt.AlignRight | Qt.AlignVCenter, f"-{minus}")
+            add = f"+{plus}"
+            add_w = p.fontMetrics().horizontalAdvance(add)
+            p.setPen(QColor(112, 222, 150, 240))
+            p.drawText(QRectF(card.right() - 13 - sub_w - 7 - add_w, 63, add_w + 2, 15),
+                       Qt.AlignRight | Qt.AlignVCenter, add)
+
+        d = ease_out_cubic(self._diff_t)
+        clip = QPainterPath()
+        clip.addRoundedRect(card.adjusted(0.5, 0.5, -0.5, -0.5), 12.5, 12.5)
+        p.save()
+        p.setClipPath(clip)
+        for i, (kind_, line, text) in enumerate(rows[:2]):
+            ry = 79.0 + i * 17.0 + (1.0 - d) * 7.0
+            p.setOpacity(self._rv * a * d)
+            row = QRectF(card.left() + 1, ry, w - 2, 17)
+            if kind_ == "del":
+                p.fillRect(row, QColor(214, 70, 70, 82))
+            elif kind_ == "add":
+                p.fillRect(row, QColor(58, 170, 96, 78))
+            col = (QColor(255, 218, 214, 240) if kind_ == "del" else
+                   QColor(214, 255, 226, 240) if kind_ == "add" else QColor(255, 255, 255, 190))
+            p.setFont(mono_font(9))
+            p.setPen(QColor(255, 255, 255, 112))
+            p.drawText(QRectF(x + 13, ry, 20, 17), Qt.AlignLeft | Qt.AlignVCenter,
+                       str(line) if line else "›")
+            p.setPen(col)
+            p.drawText(QRectF(x + 40, ry, w - 54, 17), Qt.AlignLeft | Qt.AlignVCenter,
+                       p.fontMetrics().elidedText(text, Qt.ElideRight, int(w - 56)))
+        p.restore()
+        p.restore()
+
+    # --- phase bar ------------------------------------------------------------ #
+    def _paint_phases(self, p, kind, busy, accent, a):
+        x, w = self.COL_X, self.COL_W
+        gap = 6.0
+        sw = (w - gap * 3) / 4.0
+        p.save()
+        p.setOpacity(self._rv * a)
+        p.translate(0, (1.0 - a) * 6.0)
+        for i, name in enumerate(self.PHASES):
+            sx = x + i * (sw + gap)
+            fill = clamp01(self._seg[i])
+            track = QRectF(sx, 121, sw, 3)
+            p.setPen(Qt.NoPen)
+            p.setBrush(QColor(255, 255, 255, 40))
+            p.drawRoundedRect(track, 1.5, 1.5)
+            if fill > 0.004:
+                bar = QRectF(sx, 121, max(3.0, sw * fill), 3)
+                p.setBrush(QColor(255, 246, 238, 238))
+                p.drawRoundedRect(bar, 1.5, 1.5)
+                if busy and 0.05 < fill < 0.98:               # shimmer on the live segment
+                    p.save()
+                    p.setClipRect(bar)
+                    bw = 26.0
+                    x0 = bar.left() - bw + (bar.width() + bw) * ((self._t / 1.6) % 1.0)
+                    g = QLinearGradient(x0, 0, x0 + bw, 0)
+                    g.setColorAt(0.0, QColor(255, 255, 255, 0))
+                    g.setColorAt(0.5, with_alpha(accent, 200))
+                    g.setColorAt(1.0, QColor(255, 255, 255, 0))
+                    p.setBrush(g)
+                    p.drawRect(bar)
+                    p.restore()
+            p.setFont(ui_font(8, QFont.Weight.Bold, False, 1.4))
+            p.setPen(QColor(255, 255, 255, int(112 + 124 * clamp01(fill * 1.6))))
+            p.drawText(QRectF(sx, 127, sw, 12), Qt.AlignLeft | Qt.AlignVCenter, name)
+        p.restore()
+
+
+class AgentCard(QWidget, _Reveal):
+    """Home-page agent card: a small character whose mood mirrors what the agent is doing.
+
+    sleep   · no agent running          focus   · working, eyes scan the work
+    curious · the agent needs an answer happy   · just finished
+    idle    · session open but quiet    (eyes also follow the cursor)
+    """
+
+    clicked = Signal()
+    focus_clicked = Signal()
+    bt_clicked = Signal()
+    bt_disconnect = Signal(object)
+    VIEWS = 3                    # 0 agent  ·  1 focus timer  ·  2 bluetooth (scroll to switch)
+    PHASES = AgentPage.PHASES
+    # mood -> (eye height, smile, gaze sweep, bob, asymmetry)
+    MOODS = {"sleep": (0.13, 0.0, 0.0, 0.0, 0.0), "idle": (1.0, 0.0, 1.0, 0.0, 0.0),
+             "focus": (0.80, 0.0, 3.6, 0.0, 0.0), "curious": (1.16, 0.0, 1.6, 2.6, 0.2),
+             "happy": (0.62, 1.0, 0.0, 1.8, 0.0)}
+
+    def __init__(self):
+        super().__init__()
+        self.setFixedSize(AGENT_CARD.size())
+        self.setMouseTracking(True)
+        self.setCursor(Qt.PointingHandCursor)
+        self._c1, self._c2 = QColor(DEFAULT_TINT), QColor(DEFAULT_TINT_2)
+        self._state = {"kind": "", "busy": False, "waiting": False, "age": 0.0, "action": "",
+                       "detail": "", "phase": -1, "elapsed": 0.0}
+        self._got = self._prev = time.monotonic()
+        self._t = 0.0
+        self._hover, self._hov, self._down = 0.0, False, False
+        self._look, self._look_t = QPointF(0, 0), QPointF(0, 0)
+        self._par = list(self.MOODS["sleep"])
+        self._seg = [0.0] * 4
+        self._text, self._text_old, self._text_t = "", "", 1.0
+        self._vpos, self._vtarget = 0.0, 0.0        # continuous, endless (wraps every VIEWS)
+        self._settle = QTimer(self)                 # after the wheel stops, ease to a whole view
+        self._settle.setSingleShot(True)
+        self._settle.setInterval(130)
+        self._settle.timeout.connect(self._snap)
+        self._focus = None
+        self._devices: list = []
+        self._bt_hot = False
+        self._pulse = QTimer(self)
+        self._pulse.setInterval(16)
+        self._pulse.timeout.connect(self._tick)
+
+    # ------------------------------------------------------------------ api #
+    def set_tints(self, c1: QColor, c2: QColor):
+        self._c1, self._c2 = QColor(c1), QColor(c2)
+        self.update()
+
+    def set_focus(self, focus):
+        self._focus = focus
+
+    def set_devices(self, devices):
+        self._devices = list(devices or [])
+        self.update()
+
+    def _cur(self) -> int:
+        return int(round(self._vpos)) % self.VIEWS
+
+    def _snap(self):
+        self._vtarget = float(round(self._vtarget))
+
+    def wheelEvent(self, e):
+        dy = e.angleDelta().y()
+        if not dy:
+            e.ignore()
+            return
+        # follow the wheel continuously: one notch = one view, a touchpad moves it fractionally
+        step = max(-1.0, min(1.0, dy / 120.0))
+        self._vtarget += step                       # scroll up = next, and it never runs out
+        self._vtarget = max(self._vpos - 1.5, min(self._vpos + 1.5, self._vtarget))
+        self._settle.start()
+        e.accept()
+
+    def set_state(self, state: dict):
+        self._state = dict(state or {})
+        self._got = time.monotonic()
+        line = self._headline()
+        if line != self._text:
+            self._text_old, self._text, self._text_t = self._text, line, 0.0
+        self.update()
+
+    def showEvent(self, e):
+        self._prev = time.monotonic()
+        self._pulse.start()
+        super().showEvent(e)
+
+    def hideEvent(self, e):
+        self._pulse.stop()
+        super().hideEvent(e)
+
+    # ---------------------------------------------------------------- state #
+    def mood(self) -> str:
+        st = self._state
+        if not st.get("kind"):
+            return "sleep"
+        if st.get("busy"):
+            return "curious" if st.get("waiting") else "focus"
+        return "happy" if float(st.get("age") or 0.0) < 30.0 else "idle"
+
+    def _headline(self) -> str:
+        st, mood = self._state, self.mood()
+        if mood == "sleep":
+            return "No agent running"
+        if mood == "curious":
+            return "Needs your answer"
+        if mood == "happy":
+            return "All done"
+        if mood == "idle":
+            return "Session idle"
+        text = str(st.get("action") or "Working")
+        if st.get("app"):
+            return text
+        return f"{text} {st.get('detail') or ''}".strip()
+
+    def _sub(self) -> str:
+        st, mood = self._state, self.mood()
+        clock = focus_clock(self._elapsed())
+        if mood == "sleep":
+            return "Start Claude Code or Codex"
+        if mood == "happy":
+            return f"Finished in {clock}"
+        if mood == "idle":
+            return "Click to open the agent"
+        phase = max(0, min(2, int(st.get("phase", -1))))
+        return f"{clock}  ·  {self.PHASES[phase]}" if not st.get("app") else f"{clock}  ·  OPEN"
+
+    def _elapsed(self) -> float:
+        extra = (time.monotonic() - self._got) if self._state.get("busy") else 0.0
+        return float(self._state.get("elapsed") or 0.0) + extra
+
+    def _targets(self) -> list[float]:
+        st = self._state
+        if not st.get("kind"):
+            return [0.0] * 4
+        if not st.get("busy"):
+            return [1.0] * 4
+        if st.get("app"):
+            return [0.0] * 4
+        phase = max(0, min(2, int(st.get("phase", -1))))
+        return [1.0 if i < phase else (0.5 if i == phase else 0.0) for i in range(3)] + [0.0]
+
+    def _accent(self) -> QColor:
+        return {"sleep": QColor(150, 158, 190), "curious": QColor(255, 178, 92),
+                "happy": QColor(112, 222, 150), "idle": pastel(self._c2, 0.7, 1.0)}.get(
+            self.mood(), QColor(238, 134, 74))
+
+    # --------------------------------------------------------------- motion #
+    def _tick(self):
+        now = time.monotonic()
+        dt_ = min(0.05, max(0.0, now - self._prev))
+        self._prev = now
+        self._t += dt_
+        k = 1.0 - math.exp(-dt_ * 7.0)
+        goal = self.MOODS[self.mood()]
+        for i, g in enumerate(goal):
+            self._par[i] += (g - self._par[i]) * k
+        kk = 1.0 - math.exp(-dt_ * 10.0)
+        self._look.setX(self._look.x() + (self._look_t.x() - self._look.x()) * kk)
+        self._look.setY(self._look.y() + (self._look_t.y() - self._look.y()) * kk)
+        for i, g in enumerate(self._targets()):
+            self._seg[i] += (g - self._seg[i]) * (1.0 - math.exp(-dt_ * 5.5))
+        self._hover += ((1.0 if self._hov else 0.0) - self._hover) * (1.0 - math.exp(-dt_ * 12.0))
+        self._text_t = min(1.0, self._text_t + dt_ / 0.4)
+        self._vpos += (self._vtarget - self._vpos) * (1.0 - math.exp(-dt_ * 10.0))
+        if abs(self._vtarget - self._vpos) < 0.003 and not self._settle.isActive():
+            wrap = math.floor(self._vtarget / self.VIEWS) * self.VIEWS
+            self._vtarget -= wrap
+            self._vpos = float(self._vtarget)
+        tip = ("Open the agent view", "Start or pause focus", "Open Bluetooth")[self._cur()]
+        if tip != self.toolTip():
+            self.setToolTip(tip)
+        self.update()
+
+    # --------------------------------------------------------------- events #
+    def enterEvent(self, e):
+        self._hov = True
+        super().enterEvent(e)
+
+    def leaveEvent(self, e):
+        self._hov, self._down = False, False
+        self._look_t = QPointF(0, 0)
+        super().leaveEvent(e)
+
+    def mouseMoveEvent(self, e):
+        c = QPointF(self.width() / 2.0, 40.0)
+        d = e.position() - c
+        self._look_t = QPointF(max(-1.0, min(1.0, d.x() / 60.0)) * 4.0,
+                               max(-1.0, min(1.0, d.y() / 40.0)) * 3.0)
+        self._bt_hot = self._cur() == 2 and self._bt_btn().contains(e.position())
+        super().mouseMoveEvent(e)
+
+    def mousePressEvent(self, e):
+        self._down = e.button() == Qt.LeftButton
+        if self._down:
+            e.accept()
+        else:
+            super().mousePressEvent(e)
+
+    def _bt_btn(self) -> QRectF:
+        return QRectF(12, 77, self.width() - 24, 20)
+
+    def mouseReleaseEvent(self, e):
+        if self._down and e.button() == Qt.LeftButton and self.rect().contains(e.position().toPoint()):
+            cur = self._cur()
+            if cur == 1:
+                self.focus_clicked.emit()
+            elif cur == 2:
+                if self._devices and self._bt_btn().contains(e.position()):
+                    self.bt_disconnect.emit(self._devices[0])
+                else:
+                    self.bt_clicked.emit()
+            else:
+                self.clicked.emit()
+        self._down = False
+
+    # ------------------------------------------------------------- painting #
+    def paintEvent(self, _e):
+        vp = self._vpos
+        if abs(vp - round(vp)) < 0.004 and int(round(vp)) % self.VIEWS == 0:
+            self._paint_agent_card(self)
+            return
+        rv = self._rv
+        if rv <= 0.004:
+            return
+        p = QPainter(self)
+        p.setRenderHints(QPainter.Antialiasing | QPainter.TextAntialiasing
+                         | QPainter.SmoothPixmapTransform)
+        w, h = self.width(), self.height()
+        accent = self._focus_accent()
+        card = QRectF(0.5, 0.5, w - 1, h - 1)
+        body = QLinearGradient(0, 0, 0, h)
+        body.setColorAt(0.0, QColor(255, 255, 255, 34 + int(18 * self._hover)))
+        body.setColorAt(1.0, QColor(255, 255, 255, 12 + int(10 * self._hover)))
+        p.setOpacity(rv)
+        p.setBrush(body)
+        p.setPen(Qt.NoPen)
+        p.drawRoundedRect(card, 18, 18)
+        clip = QPainterPath()
+        clip.addRoundedRect(card, 18, 18)
+        p.save()
+        p.setClipPath(clip)
+        wash = QRadialGradient(QPointF(w * 0.5, 40), w * 0.95)
+        wash.setColorAt(0.0, with_alpha(accent, 66))
+        wash.setColorAt(1.0, with_alpha(accent, 0))
+        p.setBrush(wash)
+        p.drawRect(card)
+        agent_pm = None
+        for idx in range(self.VIEWS):
+            d = ((idx - vp + 1.5) % self.VIEWS) - 1.5        # shortest signed distance on the loop
+            amount = clamp01(1.0 - abs(d))
+            if amount <= 0.01:
+                continue
+            p.save()
+            p.setOpacity(rv * amount)
+            p.translate(0, d * 26.0)
+            if idx == 0:
+                dpr = self.devicePixelRatioF()
+                agent_pm = QPixmap(max(1, int(w * dpr)), max(1, int(h * dpr)))
+                agent_pm.setDevicePixelRatio(dpr)
+                agent_pm.fill(Qt.transparent)
+                self._paint_agent_card(agent_pm)
+                p.drawPixmap(QPointF(0, 0), agent_pm)
+            elif idx == 1:
+                self._paint_focus_view(p, w, h)
+            else:
+                self._paint_bt_view(p, w, h)
+            p.restore()
+        p.restore()
+        rim = QLinearGradient(card.topLeft(), card.bottomRight())
+        rim.setColorAt(0.0, QColor(255, 255, 255, 78 + int(40 * self._hover)))
+        rim.setColorAt(1.0, with_alpha(accent, 40 + int(40 * self._hover)))
+        p.setOpacity(rv)
+        p.setBrush(Qt.NoBrush)
+        p.setPen(QPen(QBrush(rim), 1.0))
+        p.drawRoundedRect(card, 18, 18)
+        p.end()
+
+    def _focus_accent(self) -> QColor:
+        f = self._focus
+        if f is not None and f.active and f.paused:
+            return QColor(255, 178, 92)
+        return pastel(self._c2, 0.78)
+
+    def _eyebrow(self, p, w, text: str, accent: QColor, live: bool):
+        p.setFont(ui_font(7, QFont.Weight.Bold, False, 1.4))
+        p.setPen(QColor(255, 255, 255, 150))
+        p.drawText(QRectF(13, 8, w - 40, 11), Qt.AlignLeft | Qt.AlignVCenter, text)
+        beat = 0.5 + 0.5 * math.sin(self._t * 4.0) if live else 0.0
+        p.setPen(Qt.NoPen)
+        p.setBrush(with_alpha(accent, int(46 + 60 * beat)))
+        p.drawEllipse(QPointF(w - 15, 13.5), 5.5 + 1.5 * beat, 5.5 + 1.5 * beat)
+        p.setBrush(with_alpha(accent, 240))
+        p.drawEllipse(QPointF(w - 15, 13.5), 2.8, 2.8)
+
+    def _paint_focus_view(self, p, w, h):
+        f = self._focus
+        accent = self._focus_accent()
+        active = bool(f is not None and f.active)
+        paused = bool(active and f.paused)
+        self._eyebrow(p, w, "FOCUS", accent, active and not paused)
+        ring = QRectF(w / 2.0 - 22, 24, 44, 44)
+        p.setBrush(Qt.NoBrush)
+        p.setPen(QPen(QColor(255, 255, 255, 40), 4.0))
+        p.drawEllipse(ring)
+        frac = clamp01(f.remaining / max(1.0, f.total)) if f is not None else 1.0
+        p.setPen(QPen(accent, 4.0, Qt.SolidLine, Qt.RoundCap))
+        p.drawArc(ring, 90 * 16, int(-360 * 16 * max(0.003, frac)))
+        left = f.remaining if f is not None else 1500.0
+        p.setFont(ui_font(11, QFont.Weight.Bold, True))
+        p.setPen(QColor(255, 255, 255, 245))
+        p.drawText(ring, Qt.AlignCenter, focus_clock(left))
+        p.setFont(ui_font(11, QFont.Weight.Bold, True, 0.1))
+        title = "Paused" if paused else ("Focusing" if active else "Start focus")
+        p.drawText(QRectF(10, 70, w - 20, 16), Qt.AlignCenter, title)
+        p.setFont(ui_font(8, QFont.Weight.Medium, False, 0.5))
+        p.setPen(QColor(255, 255, 255, 150))
+        sub = (f"{f.preset} min  ·  {f.done} done today" if f is not None else "")
+        p.drawText(QRectF(10, 85, w - 20, 12), Qt.AlignCenter, sub)
+
+    def _paint_bt_view(self, p, w, h):
+        accent = self._focus_accent()                    # follows the island theme
+        devs = self._devices
+        n = len(devs)
+        self._eyebrow(p, w, "BLUETOOTH" + (f"  ·  {n}" if n > 1 else ""), accent, n > 0)
+        if not devs:
+            disc = QRectF(w / 2.0 - 19, 27, 38, 38)
+            p.setPen(QPen(QColor(255, 255, 255, 46), 1))
+            p.setBrush(QColor(255, 255, 255, 22))
+            p.drawEllipse(disc)
+            create_icon_pixmap("bluetooth", 18, QColor(255, 255, 255, 220)).paint(
+                p, QRect(int(w / 2) - 9, 37, 18, 18))
+            p.setFont(ui_font(11, QFont.Weight.Bold, True, 0.1))
+            p.setPen(QColor(255, 255, 255, 235))
+            p.drawText(QRectF(10, 70, w - 20, 16), Qt.AlignCenter, "No device")
+            p.setFont(ui_font(8, QFont.Weight.Medium, False, 0.5))
+            p.setPen(QColor(255, 255, 255, 150))
+            p.drawText(QRectF(10, 85, w - 20, 12), Qt.AlignCenter, "Click for settings")
+            return
+        d = devs[0]
+        disc = QRectF(13, 26, 32, 32)
+        p.setPen(QPen(with_alpha(accent, 90), 1.2))
+        p.setBrush(QColor(255, 255, 255, 22))
+        p.drawEllipse(disc)
+        paint_device_art(p, disc.adjusted(6.5, 6.5, -6.5, -6.5), device_icon_kind(d.dev_type))
+
+        p.setFont(ui_font(11, QFont.Weight.Bold, True, 0.1))
+        p.setPen(QColor(255, 255, 255, 245))
+        name = p.fontMetrics().elidedText(d.name or d.product or "Device", Qt.ElideRight, w - 66)
+        p.drawText(QRectF(53, 25, w - 60, 16), Qt.AlignLeft | Qt.AlignVCenter, name)
+
+        # battery: slim glyph in the theme accent, percentage beside it
+        pct = d.battery
+        bx, by = 54.0, 46.0
+        low = pct is not None and pct <= 20
+        fill = QColor(255, 178, 92) if low else accent
+        p.setBrush(Qt.NoBrush)
+        p.setPen(QPen(QColor(255, 255, 255, 110), 1.0))
+        p.drawRoundedRect(QRectF(bx, by, 20, 9), 2.6, 2.6)
+        p.setPen(Qt.NoPen)
+        p.setBrush(QColor(255, 255, 255, 110))
+        p.drawRoundedRect(QRectF(bx + 20.8, by + 2.6, 1.6, 3.8), 0.8, 0.8)
+        if pct is not None:
+            p.setBrush(with_alpha(fill, 235))
+            p.drawRoundedRect(QRectF(bx + 1.6, by + 1.6, 16.8 * clamp01(pct / 100.0), 5.8),
+                              1.6, 1.6)
+        p.setFont(ui_font(9, QFont.Weight.DemiBold, True, 0.2))
+        p.setPen(QColor(255, 255, 255, 215))
+        p.drawText(QRectF(bx + 28, by - 4, 44, 17), Qt.AlignLeft | Qt.AlignVCenter,
+                   "—" if pct is None else f"{int(pct)}%")
+
+        # disconnect: quiet glass pill, no alarm colours
+        btn = self._bt_btn()
+        hot = 1.0 if self._bt_hot else 0.0
+        g = QLinearGradient(btn.topLeft(), btn.bottomLeft())
+        g.setColorAt(0.0, QColor(255, 255, 255, int(34 + 30 * hot)))
+        g.setColorAt(1.0, QColor(255, 255, 255, int(14 + 22 * hot)))
+        p.setPen(QPen(QColor(255, 255, 255, int(56 + 60 * hot)), 1))
+        p.setBrush(g)
+        p.drawRoundedRect(btn, btn.height() / 2, btn.height() / 2)
+        p.setFont(ui_font(8, QFont.Weight.Bold, False, 1.2))
+        p.setPen(QColor(255, 255, 255, int(200 + 45 * hot)))
+        p.drawText(btn, Qt.AlignCenter, "DISCONNECT")
+
+    def _paint_agent_card(self, target):
+        rv = self._rv
+        if rv <= 0.004:
+            return
+        p = QPainter(target)
+        p.setRenderHints(QPainter.Antialiasing | QPainter.TextAntialiasing
+                         | QPainter.SmoothPixmapTransform)
+        w, h = self.width(), self.height()
+        st, mood, t = self._state, self.mood(), self._t
+        accent = self._accent()
+        a_card, a_eyes, a_text = seg(rv, 0.0, 0.5), seg(rv, 0.1, 0.55), seg(rv, 0.2, 0.55)
+        p.setOpacity(rv)
+        if self._down:
+            p.translate(w / 2.0, h / 2.0)
+            p.scale(0.985, 0.985)
+            p.translate(-w / 2.0, -h / 2.0)
+
+        card = QRectF(0.5, 0.5, w - 1, h - 1)
+        body = QLinearGradient(0, 0, 0, h)
+        body.setColorAt(0.0, QColor(255, 255, 255, 34 + int(18 * self._hover)))
+        body.setColorAt(1.0, QColor(255, 255, 255, 12 + int(10 * self._hover)))
+        p.setBrush(body)
+        p.setPen(Qt.NoPen)
+        p.drawRoundedRect(card, 18, 18)
+        p.save()
+        clip = QPainterPath()
+        clip.addRoundedRect(card, 18, 18)
+        p.setClipPath(clip)
+        wash = QRadialGradient(QPointF(w * 0.5, 36), w * 0.95)
+        wash.setColorAt(0.0, with_alpha(accent, int((86 if mood == "focus" else 62) * a_card)))
+        wash.setColorAt(1.0, with_alpha(accent, 0))
+        p.setBrush(wash)
+        p.drawRect(card)
+        p.restore()
+        rim = QLinearGradient(card.topLeft(), card.bottomRight())
+        rim.setColorAt(0.0, QColor(255, 255, 255, 78 + int(40 * self._hover)))
+        rim.setColorAt(1.0, with_alpha(accent, 40 + int(40 * self._hover)))
+        p.setBrush(Qt.NoBrush)
+        p.setPen(QPen(QBrush(rim), 1.0))
+        p.drawRoundedRect(card, 18, 18)
+
+        # eyebrow + live dot
+        kind = str(st.get("kind") or "AGENT")
+        p.setOpacity(rv * a_text)
+        p.setFont(ui_font(7, QFont.Weight.Bold, False, 1.4))
+        p.setPen(QColor(255, 255, 255, 150))
+        p.drawText(QRectF(13, 8, w - 40, 11), Qt.AlignLeft | Qt.AlignVCenter, kind.upper())
+        beat = 0.5 + 0.5 * math.sin(t * 4.0) if st.get("busy") else 0.0
+        p.setPen(Qt.NoPen)
+        p.setBrush(with_alpha(accent, int(46 + 60 * beat)))
+        p.drawEllipse(QPointF(w - 15, 13.5), 5.5 + 1.5 * beat, 5.5 + 1.5 * beat)
+        p.setBrush(with_alpha(accent, 240 if st.get("kind") else 110))
+        p.drawEllipse(QPointF(w - 15, 13.5), 2.8, 2.8)
+
+        # character
+        p.setOpacity(rv * a_eyes)
+        self._paint_eyes(p, w / 2.0, 41.0 + (1.0 - a_eyes) * 6.0, accent, mood)
+
+        # text
+        p.setOpacity(rv * a_text)
+        e_ = ease_out_cubic(self._text_t)
+        p.setFont(ui_font(11, QFont.Weight.Bold, True, 0.1))
+        fm = p.fontMetrics()
+        for text, alpha, dy in ((self._text_old, 1.0 - e_, -5.0 * e_),
+                                (self._text, e_, 5.0 * (1.0 - e_))):
+            if alpha > 0.01 and text:
+                p.setOpacity(rv * a_text * alpha)
+                p.setPen(QColor(255, 255, 255, 242))
+                p.drawText(QRectF(10, 63 + dy, w - 20, 16), Qt.AlignCenter,
+                           fm.elidedText(text, Qt.ElideRight, w - 22))
+        p.setOpacity(rv * a_text)
+        p.setFont(ui_font(8, QFont.Weight.Medium, False, 0.5))
+        p.setPen(QColor(255, 255, 255, 150))
+        p.drawText(QRectF(10, 79, w - 20, 12), Qt.AlignCenter, self._sub())
+
+        # phase bar
+        gap, bx = 4.0, 14.0
+        sw = (w - 2 * bx - gap * 3) / 4.0
+        for i in range(4):
+            x = bx + i * (sw + gap)
+            p.setPen(Qt.NoPen)
+            p.setBrush(QColor(255, 255, 255, 38))
+            p.drawRoundedRect(QRectF(x, 94, sw, 3), 1.5, 1.5)
+            fill = clamp01(self._seg[i])
+            if fill > 0.004:
+                p.setBrush(QColor(255, 246, 238, 236))
+                p.drawRoundedRect(QRectF(x, 94, max(3.0, sw * fill), 3), 1.5, 1.5)
+
+    def _paint_eyes(self, p, cx: float, cy: float, accent: QColor, mood: str):
+        t = self._t
+        hs, smile, sweep, bob, asym = self._par
+        cyc = t % 4.6
+        blink = math.sin(math.pi * cyc / 0.18) if (cyc < 0.18 and mood not in ("sleep", "happy")) else 0.0
+        gx = sweep * math.sin(t * (1.5 if mood == "focus" else 0.6)) + self._look.x() * self._hover
+        gy = self._look.y() * self._hover
+        by = -bob * abs(math.sin(t * (3.2 if mood == "curious" else 2.6)))
+        glow = QRadialGradient(QPointF(cx, cy), 34)
+        glow.setColorAt(0.0, with_alpha(accent, 84 if mood in ("focus", "curious", "happy") else 36))
+        glow.setColorAt(1.0, with_alpha(accent, 0))
+        p.setPen(Qt.NoPen)
+        p.setBrush(glow)
+        p.drawEllipse(QPointF(cx, cy), 34, 34)
+        for sign in (-1, 1):
+            grow = 1.0 + (asym if sign > 0 else -asym * 0.4)
+            eh = max(3.5, 27.0 * hs * grow * (1.0 - 0.88 * blink))
+            ew = 18.0
+            r = QRectF(cx + sign * 14 - ew / 2 + gx, cy + by + gy - eh / 2, ew, eh)
+            if smile < 0.98:
+                p.save()
+                p.setOpacity(p.opacity() * (1.0 - smile))
+                g = QLinearGradient(0, r.top(), 0, r.bottom())
+                g.setColorAt(0.0, QColor(255, 238, 226, 242))
+                g.setColorAt(1.0, QColor(255, 214, 190, 200))
+                p.setBrush(g)
+                p.setPen(QPen(QColor(255, 255, 255, 70), 1.0))
+                p.drawRoundedRect(r, ew / 2, min(ew / 2, eh / 2))
+                p.restore()
+            if smile > 0.02:                                     # happy ^ ^ eyes
+                p.save()
+                p.setOpacity(p.opacity() * smile)
+                path = QPainterPath()
+                mx, my = cx + sign * 14 + gx, cy + by + gy + 3.0
+                path.moveTo(mx - 7.5, my)
+                path.quadTo(mx, my - 12.0, mx + 7.5, my)
+                p.setBrush(Qt.NoBrush)
+                p.setPen(QPen(QColor(255, 238, 226, 250), 4.2, Qt.SolidLine, Qt.RoundCap))
+                p.drawPath(path)
+                p.restore()
+        if mood == "curious":                                    # the question bubble
+            s = 1.0 + 0.12 * math.sin(t * 5.0)
+            p.save()
+            p.translate(cx + 30, cy - 22)
+            p.scale(s, s)
+            p.setBrush(with_alpha(accent, 235))
+            p.setPen(Qt.NoPen)
+            p.drawEllipse(QPointF(0, 0), 8, 8)
+            p.setFont(ui_font(11, QFont.Weight.Bold, True))
+            p.setPen(QColor(40, 26, 16))
+            p.drawText(QRectF(-8, -8, 16, 16), Qt.AlignCenter, "?")
+            p.restore()
+        elif mood == "happy":                                    # little celebration sparkles
+            for i, (dx, dy, ph) in enumerate(((30, -22, 0.0), (-31, -18, 1.7), (34, 4, 3.1))):
+                s = 0.5 + 0.5 * math.sin(t * 3.0 + ph)
+                if s < 0.05:
+                    continue
+                r0 = 2.2 + 2.4 * s
+                p.setPen(QPen(with_alpha(accent, int(70 + 170 * s)), 1.4, Qt.SolidLine, Qt.RoundCap))
+                x, y = cx + dx, cy + dy
+                p.drawLine(QPointF(x - r0, y), QPointF(x + r0, y))
+                p.drawLine(QPointF(x, y - r0), QPointF(x, y + r0))
+
+
+class DetailPage(QWidget):
+    """The expanded view of one island section, as three borderless columns.
+
+    media  · player · synced lyrics · track info
+    info   · date · weather · at a glance
+    clock  · local time · power · system
+    """
+
+    command = Signal(object)
+
+    def __init__(self):
+        super().__init__()
+        self.setFixedSize(W, H - DETAIL_TOP)
+        self.setMouseTracking(True)
+        self._kind = "media"
+        self._c1, self._c2 = QColor(DEFAULT_TINT), QColor(DEFAULT_TINT_2)
+        self._media = {"title": "Nothing playing", "artist": "", "album": "",
+                       "source": "", "playing": False, "pos": 0.0, "duration": 0.0}
+        self._lyrics = {"status": "idle", "lines": [], "plain": "", "source": ""}
+        self._art = QPixmap()
+        self._weather = None
+        self._battery = None
+        self._muted = False
+        self._stats: dict = {}
+        self._now = dt.datetime.now()
+        self._hits: dict[str, QRectF] = {}
+        self._hover = ""
+        self._t = 0.0
+        self._rv = 0.0
+        self._icons: dict = {}
+        self._lyric_to = 0
+        self._scroll = 0.0
+        self._open_t = 9.0
+        self._lyric_hits: list[tuple[QRectF, int]] = []
+        self._lyric_hover = -1
+        self._pb_pos = 0.0
+        self._pb_t0 = time.monotonic()
+        self._pb_playing = False
+        self._t_prev = time.monotonic()
+
+        self._anim = QVariantAnimation(self)
+        self._anim.setDuration(260)
+        self._anim.setEasingCurve(QEasingCurve.OutCubic)
+        self._anim.setStartValue(0.0)
+        self._anim.setEndValue(1.0)
+        self._anim.valueChanged.connect(self._on_show)
+
+        self._pulse = QTimer(self)
+        self._pulse.setInterval(16)
+        self._pulse.timeout.connect(self._tick)
+
+        self._build_media_strip()
+
+    # ------------------------------------------------------------------ api #
+    def start(self):
+        self._t = 0.0
+        self._t_prev = time.monotonic()
+        self._open_t = 0.0
+        self._apply_strip_reveal()
+        if self._kind == "media":
+            for lbl in (self._m_title, self._m_artist):
+                lbl.replay()
+        self._anim.stop()
+        self._anim.start()
+
+    def set_kind(self, kind: str):
+        self._kind = kind if kind in ("media", "info", "clock") else "media"
+        self._show_media_strip(self._kind == "media")
+        self._hits = {}
+        self._lyric_hits = []
+        self._lyric_hover = -1
+        self._pulse.setInterval(16 if self._kind == "media" else 33)
+        self.update()
+
+    def set_tints(self, c1: QColor, c2: QColor):
+        a, b = pastel(QColor(c2), 0.8), pastel(QColor(c1), 0.8)
+        if a != self._c1 or b != self._c2:
+            self._c1, self._c2 = a, b
+            self._m_slider.set_tints(c1, c2)
+            self._m_eq.set_tints(c1, c2)
+            self._m_art.set_glow(pastel(QColor(c1), 0.9, 0.95))
+            self.update()
+
+    def set_media(self, title: str, artist: str, album: str, source: str,
+                  playing: bool, duration: float):
+        before = (self._media["title"], self._media["artist"])
+        self._media.update(title=title or "Nothing playing", artist=artist or "",
+                           album=album or "", source=source or "",
+                           playing=bool(playing), duration=float(duration or 0.0))
+        if (title or "Nothing playing", artist or "") != before:
+            self._pb_pos, self._pb_t0 = 0.0, time.monotonic()
+            self._pb_playing = bool(playing)
+        has = bool(title) and title != "Nothing playing"
+        live = bool(playing) and has
+        self._m_title.set_full_text(title or "Nothing playing")
+        self._m_album.set_full_text(album or artist or "")
+        self._m_artist.set_full_text((artist or "").upper() if album else "")
+        self._m_play.set_kind("pause" if live else "play")
+        self._m_slider.setEnabled(float(duration or 0.0) > 0)
+        for w in (self._m_eq, self._m_slider, self._m_art):
+            w.set_playing(live)
+        self._m_title.set_shine(live)
+        self._m_art.set_badge(source_style(source) or self._c1.lighter(160),
+                              not has, source or "")
+        self.update()
+
+    def set_playback(self, position: float, duration: float, playing: bool):
+        target = float(position or 0.0)
+        live = self._position()
+        if self._pb_playing and playing and 0.0 < live - target < 1.0:
+            target = live          # a slightly stale report must not rewind the clock
+        self._pb_pos, self._pb_t0 = target, time.monotonic()
+        self._pb_playing = bool(playing)
+        self._media["pos"] = target
+        if duration:
+            self._media["duration"] = float(duration)
+        self._media["playing"] = bool(playing)
+        span = float(self._media.get("duration") or 0.0)
+        if not self._m_slider.isSliderDown():
+            self._m_slider.setSliderPosition(
+                int(round(clamp01(target / span) * 1000)) if span > 0 else 0)
+            self._m_cur.set_full_text(self._fmt(target))
+        self._m_tot.set_full_text(self._fmt(span) if span > 0 else "—:—")
+        self._sync_lyric_index()
+        self.update()
+
+    def _position(self) -> float:
+        """Playback time, extrapolated from the last report so every frame moves."""
+        pos = self._pb_pos + ((time.monotonic() - self._pb_t0) if self._pb_playing else 0.0)
+        duration = float(self._media.get("duration") or 0.0)
+        if duration > 0:
+            pos = min(pos, duration)
+        return max(0.0, pos)
+
+    def _sync_lyric_index(self):
+        lines = self._lyrics.get("lines") or []
+        if self._lyrics.get("status") != "ok" or not lines:
+            return
+        index = max(0, min(len(lines) - 1, lyrics_line_index(lines, self._position())))
+        if index == self._lyric_to:
+            return
+        if index < self._lyric_to and self._pb_playing:
+            # a report that lands a hair behind must not bounce the highlight back
+            if float(lines[self._lyric_to][0]) - float(lines[index][0]) < 1.0:
+                return
+        self._lyric_to = index
+
+    def _seek_lyric(self, index: int):
+        """Jump to a pressed line; the column glides there on its own clock."""
+        lines = self._lyrics.get("lines") or []
+        if not (0 <= index < len(lines)):
+            return
+        target = max(0.0, float(lines[index][0]))
+        self._pb_pos, self._pb_t0 = target, time.monotonic()
+        self._media["pos"] = target
+        self._lyric_to = index
+        self.update()
+        self.command.emit(("seek_at", target))
+
+    def set_art(self, pixmap: QPixmap):
+        self._art = QPixmap(pixmap) if pixmap is not None else QPixmap()
+        self._m_art.set_art(self._art)
+        self.update()
+
+    def set_lyrics(self, payload: dict):
+        if not isinstance(payload, dict):
+            return
+        lines = []
+        for item in payload.get("lines") or []:
+            try:
+                lines.append((float(item[0]), str(item[1])))
+            except Exception:
+                continue
+        self._lyrics = {"status": str(payload.get("status") or "none"),
+                        "lines": lines, "plain": str(payload.get("plain") or ""),
+                        "source": str(payload.get("source") or "")}
+        self._lyric_to = 0
+        self._scroll = 0.0
+        self._lyric_hover = -1
+        self._sync_lyric_index()
+        self.update()
+
+    def set_lyrics_loading(self):
+        self._lyrics = {"status": "loading", "lines": [], "plain": "", "source": ""}
+        self.update()
+
+    def set_muted(self, muted: bool):
+        muted = bool(muted)
+        if muted != self._muted:
+            self._muted = muted
+            self._m_eq.set_muted(muted)
+            self.update()
+
+    def set_panel(self, now, weather, battery, stats: dict):
+        self._now = now or dt.datetime.now()
+        self._weather = weather
+        self._battery = battery
+        self._stats = dict(stats or {})
+        self.update()
+
+    # --------------------------------------------------------------- motion #
+    def showEvent(self, e):
+        self._t_prev = time.monotonic()
+        self._pulse.start()
+        super().showEvent(e)
+
+    def hideEvent(self, e):
+        self._pulse.stop()
+        super().hideEvent(e)
+
+    def _tick(self):
+        now = time.monotonic()
+        dt = min(0.25, max(0.0, now - self._t_prev))
+        self._t += dt
+        self._t_prev = now
+        self._open_t += dt
+        if self._kind == "media":
+            self._advance_lyric_scroll(dt)
+            self._tick_media_strip(dt)
+        self._sync_lyric_index()
+        self.update()
+
+    def _on_show(self, v):
+        self._rv = float(v)
+        self.update()
+
+    # --------------------------------------------------------------- events #
+    def _hit_at(self, pos):
+        for name, rect in self._hits.items():
+            if rect.contains(pos):
+                return name
+        return ""
+
+    def _lyric_at(self, pos) -> int:
+        for rect, index in self._lyric_hits:
+            if rect.contains(pos):
+                return index
+        return -1
+
+    def mouseMoveEvent(self, e):
+        pos = e.position()
+        hot = self._lyric_at(pos)
+        if hot != self._lyric_hover:
+            self._lyric_hover = hot
+            self.update()
+        hit = self._hit_at(pos)
+        if hot >= 0:
+            hit = "lyric"
+        if hit != self._hover:
+            self._hover = hit
+            self.setCursor(Qt.PointingHandCursor if hit else Qt.ArrowCursor)
+            self.update()
+        super().mouseMoveEvent(e)
+
+    def leaveEvent(self, e):
+        self._hover = ""
+        self._lyric_hover = -1
+        self.setCursor(Qt.ArrowCursor)
+        self.update()
+        super().leaveEvent(e)
+
+    def mousePressEvent(self, e):
+        if e.button() != Qt.LeftButton:
+            return
+        pos = e.position()
+        index = self._lyric_at(pos)
+        if index >= 0:
+            self._seek_lyric(index)
+            return
+        seek = self._hits.get("seek")
+        if seek is not None and seek.contains(pos):
+            frac = clamp01((pos.x() - seek.left()) / max(1.0, seek.width()))
+            self.command.emit(("seek", frac))
+            return
+        hit = self._hit_at(pos)
+        if hit:
+            self.command.emit((hit, None))
+
+    # -------------------------------------------------------------- helpers #
+    def _accent(self) -> QColor:
+        return pastel(self._c2, 0.85, 1.0)
+
+    def _elide(self, p, text, width: float) -> str:
+        return p.fontMetrics().elidedText(str(text), Qt.ElideRight, int(max(8, width)))
+
+    def _text(self, p, rect, flags, text, color: QColor):
+        p.setPen(QColor(0, 0, 0, 105))
+        p.drawText(rect.translated(0, 1), flags, text)
+        p.setPen(color)
+        p.drawText(rect, flags, text)
+
+    def _hdr(self, p, card: QRectF, text: str):
+        p.setFont(ui_font(7, QFont.Weight.Bold, False, 1.8))
+        p.setPen(QColor(255, 255, 255, 142))
+        p.drawText(QRectF(card.left(), card.top() + 7, card.width(), 10),
+                   Qt.AlignLeft | Qt.AlignVCenter, text)
+
+    def _icon(self, p, kind: str, rect: QRectF, color: QColor | None = None, px: int = 14):
+        key = (kind, px)
+        icon = self._icons.get(key)
+        if icon is None:
+            icon = self._icons[key] = create_icon_pixmap(
+                kind, px, color or QColor(255, 255, 255, 238))
+        icon.paint(p, QRect(int(round(rect.x())), int(round(rect.y())),
+                            int(round(rect.width())), int(round(rect.height()))))
+
+    def _chip(self, p, rect: QRectF, label: str, name: str, accent: bool = False):
+        hot = self._hover == name
+        col = self._accent() if accent else QColor(255, 255, 255)
+        p.setBrush(QColor(255, 255, 255, 46 if hot else 24))
+        p.setPen(QPen(with_alpha(col, 130 if accent else (92 if hot else 58)), 1.0))
+        p.drawRoundedRect(rect, rect.height() / 2, rect.height() / 2)
+        p.setFont(ui_font(7, QFont.Weight.Bold, False, 1.3))
+        p.setPen(with_alpha(col, 238 if hot or accent else 196))
+        p.drawText(rect, Qt.AlignCenter, label)
+
+    @staticmethod
+    def _source_label(source: str) -> str:
+        raw = (source or "").strip()
+        low = raw.lower()
+        for key, label in (("spotify", "Spotify"), ("zune", "Groove Music"),
+                           ("msedge", "Edge"), ("chrome", "Chrome"),
+                           ("firefox", "Firefox"), ("tidal", "TIDAL"),
+                           ("deezer", "Deezer"), ("vlc", "VLC"),
+                           ("musicbee", "MusicBee"), ("foobar", "foobar2000")):
+            if key in low:
+                return label
+        if "!" in raw:
+            return raw.rsplit("!", 1)[-1] or "Media"
+        base = raw.rsplit(".", 1)[0]
+        return base or "Media"
+
+    def _fmt(self, seconds: float) -> str:
+        s = int(max(0, seconds))
+        m, s = divmod(s, 60)
+        h, m = divmod(m, 60)
+        return f"{h}:{m:02d}:{s:02d}" if h else f"{m}:{s:02d}"
+
+    def _row(self, p, card: QRectF, y: float, key: str, value: str, wide: bool = True):
+        p.setFont(ui_font(7, QFont.Weight.DemiBold, False, 1.15))
+        p.setPen(QColor(255, 255, 255, 116))
+        p.drawText(QRectF(card.left(), y, 76, 11), Qt.AlignLeft | Qt.AlignVCenter, key)
+        p.setFont(ui_font(9, QFont.Weight.DemiBold))
+        va = (Qt.AlignRight if wide else Qt.AlignLeft) | Qt.AlignVCenter
+        rect = (QRectF(card.left() + 80, y, card.width() - 80, 12) if wide
+                else QRectF(card.left(), y + 10, card.width(), 12))
+        p.setPen(QColor(255, 255, 255, 226))
+        p.drawText(rect, va, self._elide(p, value, rect.width()))
+
+    def paintEvent(self, _e):
+        if self._rv <= 0.004:
+            return
+        p = QPainter(self)
+        p.setRenderHints(QPainter.Antialiasing | QPainter.TextAntialiasing
+                         | QPainter.SmoothPixmapTransform)
+        self._hits = {}
+        self._lyric_hits = []
+        p.setOpacity(self._rv)
+        if self._kind == "media":
+            cols = (QRectF(18, 6, 226, 102), QRectF(250, 6, 374, 102))
+            painters = (None, self._media_lyrics)
+            dividers = (241.0,)
+        else:
+            cols = (QRectF(18, 6, 224, 102), QRectF(262, 6, 168, 102),
+                    QRectF(450, 6, 174, 102))
+            painters = ((self._info_date, self._info_weather, self._info_glance)
+                        if self._kind == "info" else
+                        (self._clock_time, self._clock_power, self._clock_system))
+            dividers = (250.0, 438.0)
+        for x in dividers:
+            edge = QLinearGradient(x, 14, x, 102)
+            edge.setColorAt(0.0, QColor(255, 255, 255, 0))
+            edge.setColorAt(0.45, QColor(255, 255, 255, 34))
+            edge.setColorAt(1.0, QColor(255, 255, 255, 0))
+            p.setPen(QPen(QBrush(edge), 1.0))
+            p.drawLine(QPointF(x, 14), QPointF(x, 102))
+        for index, (col, paint) in enumerate(zip(cols, painters)):
+            if paint is None:
+                continue
+            p.save()
+            p.setOpacity(clamp01(self._rv * 1.35 - index * 0.12))
+            paint(p, col)
+            p.restore()
+
+    # ---------------------------------------------------------------- media #
+    def _build_media_strip(self):
+        """The island's own player widgets, so this page animates identically."""
+        mute = QColor(255, 255, 255, 170)
+        self._m_art = ArtWidget()
+        self._m_art.setParent(self)
+        self._m_art.move(2, -1)
+        self._m_art.clicked.connect(lambda: self.command.emit(("open", None)))
+
+        self._m_title = GlassText(15, QFont.Weight.Bold, QColor(226, 230, 244),
+                                  display=True, scramble=True, marquee=True, shine=True)
+        self._m_album = GlassText(11, QFont.Weight.Medium, QColor(255, 255, 255, 208),
+                                  marquee=True)
+        self._m_artist = GlassText(9, QFont.Weight.DemiBold, QColor(255, 255, 255, 150),
+                                   spacing=1.2, scramble=True, marquee=True)
+        for lbl, (y, hh) in zip((self._m_title, self._m_album, self._m_artist),
+                                ((10, 19), (29, 15), (44, 13))):
+            lbl.setParent(self)
+            lbl.setGeometry(TEXT_X, y, TEXT_W, hh)
+
+        self._m_prev = GhostButton("prev", QSize(26, 26), 13)
+        self._m_play = GhostButton("play", QSize(34, 26), 15, solid=True)
+        self._m_next = GhostButton("next", QSize(26, 26), 13)
+        for btn, x in ((self._m_prev, TEXT_X - 2), (self._m_play, TEXT_X + 25),
+                       (self._m_next, TEXT_X + 60)):
+            btn.setParent(self)
+            btn.move(x, 56)
+        self._m_prev.clicked.connect(lambda: self.command.emit(("prev", None)))
+        self._m_play.clicked.connect(lambda: self.command.emit(("toggle", None)))
+        self._m_next.clicked.connect(lambda: self.command.emit(("next", None)))
+
+        self._m_eq = Equalizer()
+        self._m_eq.setParent(self)
+        self._m_eq.move(TEXT_X + TEXT_W - self._m_eq.width() + 3, 58)
+        self._m_eq.clicked.connect(lambda: self.command.emit(("mute", None)))
+
+        self._m_slider = SeekSlider()
+        self._m_slider.setParent(self)
+        self._m_slider.setGeometry(TEXT_X - ES_PAD, 84, TEXT_W + 2 * ES_PAD, 12)
+        self._m_slider.setEnabled(False)
+        self._m_slider.sliderMoved.connect(self._on_media_scrub)
+        self._m_slider.sliderReleased.connect(self._on_media_release)
+
+        self._m_cur = GlassText(9, QFont.Weight.Medium, mute, display=True, spacing=0.4)
+        self._m_tot = GlassText(9, QFont.Weight.Medium, mute, display=True, spacing=0.4,
+                                align=Qt.AlignRight)
+        for lbl, x in ((self._m_cur, TEXT_X), (self._m_tot, TEXT_X + TEXT_W - 50)):
+            lbl.setParent(self)
+            lbl.setGeometry(x, 95, 50, 12)
+        self._m_cur.set_full_text("0:00")
+        self._m_tot.set_full_text("0:00")
+
+        self._media_strip = (self._m_art, self._m_title, self._m_album, self._m_artist,
+                             self._m_prev, self._m_play, self._m_next, self._m_eq,
+                             self._m_slider, self._m_cur, self._m_tot)
+        # the same stagger the island home page uses when it opens
+        self._media_reveal = ((0.00, 0.55), (0.06, 0.45), (0.10, 0.45), (0.14, 0.45),
+                              (0.16, 0.40), (0.20, 0.40), (0.24, 0.40), (0.26, 0.40),
+                              (0.28, 0.45), (0.30, 0.40), (0.30, 0.40))
+        self._show_media_strip(False)
+
+    def _show_media_strip(self, on: bool):
+        for w in self._media_strip:
+            w.setVisible(on)
+            w.set_reveal(0.0 if on else 1.0)
+        self._m_art.set_interactive(on)
+        if on:
+            for w in self._media_strip:
+                w.raise_()
+
+    def _apply_strip_reveal(self):
+        for w, (delay, dur) in zip(self._media_strip, self._media_reveal):
+            w.set_reveal(seg(self._open_t, delay, dur))
+
+    def _tick_media_strip(self, dt: float):
+        if self._open_t < 1.6:
+            self._apply_strip_reveal()
+        self._m_art.tick(dt)
+        self._m_title.tick(dt)
+        self._m_album.tick(dt)
+        self._m_artist.tick(dt)
+        self._m_eq.tick(dt)
+        self._m_slider.tick(dt)
+        span = float(self._media.get("duration") or 0.0)
+        pos = self._position()
+        if not self._m_slider.isSliderDown():
+            if span > 0:
+                self._m_slider.setSliderPosition(int(round(clamp01(pos / span) * 1000)))
+            self._m_cur.set_full_text(self._fmt(pos))
+        self._m_tot.set_full_text(self._fmt(span) if span > 0 else "—:—")
+
+    def _on_media_scrub(self, value: int):
+        span = float(self._media.get("duration") or 0.0)
+        self._m_cur.set_full_text(self._fmt(value / 1000.0 * span))
+
+    def _on_media_release(self):
+        span = float(self._media.get("duration") or 0.0)
+        frac = clamp01(self._m_slider.value() / 1000.0)
+        self._m_cur.set_full_text(self._fmt(frac * span))
+        self.command.emit(("seek", frac))
+
+    # --------------------------------------------------------------- lyrics #
+    PITCH = 30.0
+
+    def _advance_lyric_scroll(self, dt: float):
+        """Glide the column toward the playing line, even across a long jump."""
+        target = float(self._lyric_to)
+        delta = target - self._scroll
+        if abs(delta) < 0.0015:
+            self._scroll = target
+            return
+        rate = 5.0 if abs(delta) > 2.0 else 7.5
+        self._scroll += delta * (1.0 - math.exp(-dt * rate))
+
+    @staticmethod
+    def _wrap(fm, text: str, room: float, rows: int = 2):
+        """Break a lyric into at most `rows` lines so the hero line stays whole."""
+        words = str(text).split()
+        if len(words) < 2:
+            return [str(text)]
+        out, cur = [], words[0]
+        for i, word in enumerate(words[1:], 1):
+            trial = cur + " " + word
+            if fm.horizontalAdvance(trial) <= room:
+                cur = trial
+                continue
+            out.append(cur)
+            if len(out) >= rows - 1:
+                cur = " ".join(words[i:])
+                break
+            cur = word
+        out.append(cur)
+        return out[:rows]
+
+    def _media_lyrics(self, p, b):
+        accent = self._accent()
+        p.save()
+        opening = seg(self._open_t, 0.10, 0.5)
+        p.setOpacity(p.opacity() * (0.18 + 0.82 * opening))
+        p.translate(0, (1.0 - opening) * 7.0)
+        self._hdr(p, b, "LYRICS")
+        lines = self._lyrics.get("lines") or []
+        status = self._lyrics.get("status")
+
+        if status == "loading":
+            p.setFont(ui_font(11, QFont.Weight.DemiBold, True, 0.2))
+            p.setPen(QColor(255, 255, 255, 172))
+            p.drawText(QRectF(b.left(), b.top() + 32, b.width(), 20),
+                       Qt.AlignLeft | Qt.AlignVCenter, "Listening for lyrics")
+            for i in range(3):
+                alpha = int(80 + 120 * (0.5 + 0.5 * math.sin(self._t * 2.6 - i * 0.6)))
+                p.setBrush(with_alpha(accent, alpha))
+                p.setPen(Qt.NoPen)
+                p.drawEllipse(QPointF(b.left() + 4 + i * 11, b.top() + 68), 2.6, 2.6)
+            p.restore()
+            return
+
+        if lines:
+            target = max(0, min(len(lines) - 1, self._lyric_to))
+            p.setFont(ui_font(8, QFont.Weight.Medium, True, 0.6))
+            p.setPen(QColor(255, 255, 255, 122))
+            p.drawText(QRectF(b.right() - 56, b.top() + 6, 56, 10),
+                       Qt.AlignRight | Qt.AlignVCenter,
+                       self._fmt(max(0.0, float(lines[target][0]))))
+
+            area = QRectF(b.left(), b.top() + 19, b.width(), 90)
+            pitch = self.PITCH
+            centre = self._scroll
+            base = area.center().y() + 1.0
+            room = b.width() - 26
+
+            dpr = self.devicePixelRatioF()
+            layer = QImage(max(1, int(area.width() * dpr)), max(1, int(area.height() * dpr)),
+                           QImage.Format_ARGB32_Premultiplied)
+            layer.setDevicePixelRatio(dpr)
+            layer.fill(Qt.transparent)
+            q = QPainter(layer)
+            q.setRenderHints(QPainter.Antialiasing | QPainter.TextAntialiasing)
+            q.translate(-area.left(), -area.top())
+
+            first = max(0, int(math.floor(centre)) - 3)
+            last = min(len(lines), int(math.ceil(centre)) + 4)
+            for i in range(first, last):
+                d = i - centre
+                dist = abs(d)
+                if dist > 2.7:
+                    continue
+                glow = clamp01(1.0 - dist)
+                size = 10.0 + 5.0 * glow
+                alpha = 96.0 + 150.0 * glow
+                hero = glow > 0.45
+                weight = QFont.Weight.Bold if hero else QFont.Weight.Medium
+                y = base + d * pitch
+                line = str(lines[i][1])
+                q.setFont(ui_font(int(round(size)), weight, True, 0.1))
+                rows = self._wrap(q.fontMetrics(), line, room) if hero else [line]
+                while (size > 8.6
+                       and max(q.fontMetrics().horizontalAdvance(r) for r in rows) > room):
+                    size -= 0.6
+                    q.setFont(ui_font(max(8, int(round(size))), weight, True, 0.1))
+                    rows = self._wrap(q.fontMetrics(), line, room) if hero else [line]
+                rows = [r if q.fontMetrics().horizontalAdvance(r) <= room
+                        else self._elide(q, r, room) for r in rows]
+                lh = max(13.0, size * 1.32)
+                top = y - (len(rows) - 1) * lh / 2.0
+                if i == self._lyric_hover:
+                    # the hover plate wraps every row of the line, so a 2-line lyric keeps its box
+                    box_h = max(26.0, len(rows) * lh + 10.0)
+                    q.setPen(Qt.NoPen)
+                    q.setBrush(QColor(255, 255, 255, 18))
+                    q.drawRoundedRect(QRectF(b.left() - 2, y - box_h / 2.0, b.width() - 4, box_h),
+                                      9, 9)
+                if glow > 0.05:
+                    q.setPen(Qt.NoPen)
+                    q.setBrush(with_alpha(accent, int(240 * glow)))
+                    q.drawRoundedRect(QRectF(b.left(), y - 11.0 * glow - 1.0, 2.0,
+                                             22.0 * glow + 2.0), 1.0, 1.0)
+                for k, row in enumerate(rows):
+                    rect = QRectF(b.left() + 12, top + k * lh - lh / 2, b.width() - 18, lh)
+                    if alpha > 214:
+                        q.setPen(QColor(0, 0, 0, 118))
+                        q.drawText(rect.translated(0, 1.3), Qt.AlignLeft | Qt.AlignVCenter, row)
+                    q.setPen(QColor(255, 255, 255, int(alpha)))
+                    q.drawText(rect, Qt.AlignLeft | Qt.AlignVCenter, row)
+                self._lyric_hits.append((QRectF(b.left(), y - pitch / 2, b.width(), pitch), i))
+            q.end()
+
+            fade = QLinearGradient(0, 0, 0, area.height())
+            fade.setColorAt(0.0, QColor(0, 0, 0, 0))
+            fade.setColorAt(0.18, QColor(0, 0, 0, 255))
+            fade.setColorAt(0.80, QColor(0, 0, 0, 255))
+            fade.setColorAt(1.0, QColor(0, 0, 0, 0))
+            mask = QPainter(layer)
+            mask.setCompositionMode(QPainter.CompositionMode_DestinationIn)
+            mask.fillRect(layer.rect(), fade)
+            mask.end()
+
+            p.drawImage(area.topLeft(), layer)
+            p.restore()
+            return
+
+        if self._lyrics.get("plain"):
+            p.setFont(ui_font(10, QFont.Weight.Medium, True, 0.1))
+            p.setPen(QColor(255, 255, 255, 196))
+            p.drawText(QRectF(b.left() + 12, b.top() + 24, b.width() - 18, 74),
+                       Qt.AlignLeft | Qt.TextWordWrap, self._lyrics["plain"][:260])
+            p.restore()
+            return
+
+        p.setPen(Qt.NoPen)
+        p.setBrush(QColor(255, 255, 255, 20))
+        p.drawEllipse(QPointF(b.center().x(), b.top() + 40), 18, 18)
+        self._icon(p, "lyrics", QRectF(b.center().x() - 9, b.top() + 31, 18, 18),
+                   QColor(255, 255, 255, 140), px=18)
+        p.setFont(ui_font(11, QFont.Weight.DemiBold, True, 0.2))
+        p.setPen(QColor(255, 255, 255, 208))
+        p.drawText(QRectF(b.left(), b.top() + 66, b.width(), 15), Qt.AlignCenter,
+                   "No lyrics found")
+        p.setFont(ui_font(7, QFont.Weight.Bold, True, 1.3))
+        p.setPen(QColor(255, 255, 255, 110))
+        p.drawText(QRectF(b.left(), b.top() + 84, b.width(), 10), Qt.AlignCenter,
+                   "LRCLIB  ·  SYNCED WHEN AVAILABLE")
+        p.restore()
+
+    # ----------------------------------------------------------------- info #
+    def _info_date(self, p, a):
+        accent = self._accent()
+        now = self._now
+        day = now.date()
+        leap = day.year % 4 == 0 and (day.year % 100 != 0 or day.year % 400 == 0)
+        days_in_year = 366 if leap else 365
+        doy = day.timetuple().tm_yday
+        month_end = (dt.date(day.year + (day.month == 12), day.month % 12 + 1, 1)
+                     - dt.timedelta(days=1)).day
+        week = day.isocalendar().week
+
+        self._hdr(p, a, "TODAY")
+        p.setFont(ui_font(7, QFont.Weight.Bold, False, 1.4))
+        p.setPen(QColor(255, 255, 255, 130))
+        p.drawText(QRectF(a.right() - 80, a.top() + 7, 80, 10),
+                   Qt.AlignRight | Qt.AlignVCenter, f"WEEK {week}")
+        p.setFont(ui_font(9, QFont.Weight.DemiBold, True, 0.5))
+        p.setPen(QColor(255, 255, 255, 215))
+        p.drawText(QRectF(a.left(), a.top() + 24, 120, 12),
+                   Qt.AlignLeft | Qt.AlignVCenter, day.strftime("%A").upper())
+        p.setFont(ui_font(44, QFont.Weight.Bold, True))
+        self._text(p, QRectF(a.left() - 2, a.top() + 34, 88, 50),
+                   Qt.AlignLeft | Qt.AlignVCenter, str(day.day), QColor(255, 255, 255, 250))
+        p.setFont(ui_font(12, QFont.Weight.DemiBold, True, 0.4))
+        p.setPen(QColor(255, 255, 255, 226))
+        p.drawText(QRectF(a.left() + 92, a.top() + 40, a.width() - 92, 16),
+                   Qt.AlignLeft | Qt.AlignVCenter, day.strftime("%B"))
+        p.setFont(ui_font(9, QFont.Weight.Medium, False, 0.5))
+        p.setPen(with_alpha(accent, 220))
+        p.drawText(QRectF(a.left() + 92, a.top() + 56, a.width() - 92, 12),
+                   Qt.AlignLeft | Qt.AlignVCenter, str(day.year))
+        p.setFont(ui_font(7, QFont.Weight.Medium, False, 0.4))
+        p.setPen(QColor(255, 255, 255, 140))
+        p.drawText(QRectF(a.left() + 92, a.top() + 70, a.width() - 92, 10),
+                   Qt.AlignLeft | Qt.AlignVCenter, f"{doy} of {days_in_year} days")
+
+        frac = clamp01(day.day / max(1, month_end))
+        p.setFont(ui_font(7, QFont.Weight.Bold, False, 1.3))
+        p.setPen(QColor(255, 255, 255, 132))
+        p.drawText(QRectF(a.left(), a.top() + 86, 150, 10),
+                   Qt.AlignLeft | Qt.AlignVCenter,
+                   f"MONTH  ·  {int(round(frac * 100))}%")
+        bar = QRectF(a.left(), a.top() + 99, a.width(), 2.5)
+        p.setPen(Qt.NoPen)
+        p.setBrush(QColor(255, 255, 255, 34))
+        p.drawRoundedRect(bar, 1.2, 1.2)
+        p.setBrush(with_alpha(accent, 220))
+        p.drawRoundedRect(QRectF(bar.left(), bar.top(), max(3.0, bar.width() * frac), 2.5),
+                          1.2, 1.2)
+
+    def _info_weather(self, p, b):
+        self._hdr(p, b, "WEATHER")
+        weather = self._weather
+        if weather is None:
+            p.setFont(ui_font(9, QFont.Weight.Medium))
+            p.setPen(QColor(255, 255, 255, 150))
+            p.drawText(QRectF(b.left(), b.top() + 32, b.width(), 44),
+                       Qt.AlignLeft | Qt.TextWordWrap, "Waiting for the local forecast…")
+            return
+        kind, label = weather_visual(int(weather.code), bool(weather.is_day))
+        paint_weather_icon(p, QRectF(b.left(), b.top() + 24, 38, 38), kind, self._accent())
+        p.setFont(ui_font(30, QFont.Weight.Bold, True))
+        self._text(p, QRectF(b.left() + 46, b.top() + 19, 110, 38),
+                   Qt.AlignLeft | Qt.AlignVCenter, f"{round(weather.temp)}°",
+                   QColor(255, 255, 255, 248))
+        p.setFont(ui_font(9, QFont.Weight.DemiBold))
+        p.setPen(QColor(255, 255, 255, 214))
+        p.drawText(QRectF(b.left(), b.top() + 68, b.width(), 12),
+                   Qt.AlignLeft | Qt.AlignVCenter, label)
+        p.setFont(ui_font(8, QFont.Weight.Medium))
+        p.setPen(QColor(255, 255, 255, 148))
+        p.drawText(QRectF(b.left(), b.top() + 84, b.width(), 11),
+                   Qt.AlignLeft | Qt.AlignVCenter,
+                   self._elide(p, weather.city or "Local", b.width()))
+
+    def _info_glance(self, p, c):
+        day = self._now.date()
+        leap = day.year % 4 == 0 and (day.year % 100 != 0 or day.year % 400 == 0)
+        days_in_year = 366 if leap else 365
+        doy = day.timetuple().tm_yday
+        month_end = (dt.date(day.year + (day.month == 12), day.month % 12 + 1, 1)
+                     - dt.timedelta(days=1)).day
+        battery = self._battery
+        rows = (("WEEK", str(day.isocalendar().week)),
+                ("DAY", f"{doy} / {days_in_year}"),
+                ("LEFT THIS YEAR", f"{days_in_year - doy} d"),
+                ("MONTH", f"{month_end - day.day} d left"),
+                ("BATTERY", f"{battery[0]}%" if battery else "—"))
+        self._hdr(p, c, "AT A GLANCE")
+        for i, (key, value) in enumerate(rows):
+            self._row(p, c, c.top() + 27 + i * 16, key, value)
+
+    # ---------------------------------------------------------------- clock #
+    def _clock_time(self, p, a):
+        now = self._now
+        self._hdr(p, a, "LOCAL TIME")
+        p.setFont(ui_font(38, QFont.Weight.Bold, True))
+        self._text(p, QRectF(a.left() - 2, a.top() + 16, 150, 44),
+                   Qt.AlignLeft | Qt.AlignVCenter, now.strftime("%I:%M").lstrip("0"),
+                   QColor(255, 255, 255, 250))
+        p.setFont(ui_font(9, QFont.Weight.Bold, False, 1.2))
+        p.setPen(with_alpha(self._accent(), 224))
+        p.drawText(QRectF(a.left() + 108, a.top() + 34, 60, 12),
+                   Qt.AlignLeft | Qt.AlignVCenter, now.strftime("%p"))
+        p.setFont(ui_font(9, QFont.Weight.Medium, False, 0.2))
+        p.setPen(QColor(255, 255, 255, 196))
+        p.drawText(QRectF(a.left(), a.top() + 68, a.width(), 13),
+                   Qt.AlignLeft | Qt.AlignVCenter, now.strftime("%A, %d %B %Y"))
+        p.setFont(ui_font(7, QFont.Weight.Bold, False, 1.2))
+        p.setPen(QColor(255, 255, 255, 116))
+        p.drawText(QRectF(a.left(), a.top() + 86, a.width(), 10),
+                   Qt.AlignLeft | Qt.AlignVCenter, time.tzname[0].upper())
+
+    def _clock_power(self, p, b):
+        self._hdr(p, b, "POWER")
+        battery = self._battery
+        pct = battery[0] if battery else None
+        charge = bool(battery and battery[1])
+        cx, cy, radius = b.center().x(), b.top() + 58, 28
+        p.setPen(Qt.NoPen)
+        p.setBrush(QColor(10, 13, 22, 120))
+        p.drawEllipse(QPointF(cx, cy), radius + 3, radius + 3)
+        p.setBrush(Qt.NoBrush)
+        p.setPen(QPen(QColor(255, 255, 255, 38), 3.0, Qt.SolidLine, Qt.RoundCap))
+        p.drawEllipse(QPointF(cx, cy), radius, radius)
+        frac = clamp01((pct or 0) / 100)
+        if frac > 0.002:
+            tone = (QColor(255, 176, 92) if pct is not None and pct <= 20
+                    else self._accent())
+            p.setPen(QPen(tone, 3.0, Qt.SolidLine, Qt.RoundCap))
+            p.drawArc(QRectF(cx - radius, cy - radius, radius * 2, radius * 2),
+                      90 * 16, int(-360 * 16 * frac))
+        p.setFont(ui_font(15, QFont.Weight.Bold, True))
+        p.setPen(QColor(255, 255, 255, 244))
+        p.drawText(QRectF(cx - 30, cy - 10, 60, 20), Qt.AlignCenter,
+                   f"{pct}%" if pct is not None else "—")
+        p.setFont(ui_font(7, QFont.Weight.Bold, False, 1.2))
+        p.setPen(QColor(255, 255, 255, 176) if pct is not None
+                 else QColor(255, 255, 255, 120))
+        p.drawText(QRectF(b.left(), b.top() + 92, b.width(), 10), Qt.AlignCenter,
+                   ("PLUGGED IN" if charge else "ON BATTERY") if pct is not None
+                   else "NO BATTERY")
+
+    def _clock_system(self, p, c):
+        stats = self._stats
+        ram = (f"{stats['ram_used']:.1f} / {stats['ram_total']:.0f} GB"
+               if "ram_used" in stats else "—")
+        up = stats.get("uptime")
+        if up is None:
+            uptime = "—"
+        else:
+            days, rem = divmod(int(up), 86400)
+            hours, rem = divmod(rem, 3600)
+            uptime = f"{days}d {hours:02d}h" if days else f"{hours}h {rem // 60:02d}m"
+        try:
+            win = f"Win 11 · {sys.getwindowsversion().build}"
+        except Exception:
+            win = "Windows"
+        rows = (("MEMORY", ram),
+                ("UPTIME", uptime),
+                ("DEVICE", os.environ.get("COMPUTERNAME") or "This PC"),
+                ("BUILD", win),
+                ("MEDIA", "Playing" if self._media["playing"] else "Idle"))
+        self._hdr(p, c, "SYSTEM")
+        for i, (key, value) in enumerate(rows):
+            self._row(p, c, c.top() + 27 + i * 16, key, value)
+
+
 def paint_device_art(p, rect: QRectF, kind: str):
     """Detailed vector art for a device type, drawn into a 24x24 box."""
     ink = QColor(255, 255, 255, 242)
@@ -4264,11 +7070,16 @@ class DeviceTile(QWidget, _Fader):
     """One connected Bluetooth audio device, as a live-feeling glass card."""
 
     RADIUS = 18
+    disconnect_requested = Signal(object)
 
     def __init__(self, dev: BluetoothAudioDevice):
         super().__init__()
         self.dev = dev
         self.setMouseTracking(True)
+        self._confirm_until = 0.0
+        self._removing_until = 0.0
+        self._power_icon = create_icon_pixmap("power", 10, QColor(255, 255, 255, 220))
+        self._power_hot = create_icon_pixmap("power", 10, QColor(255, 255, 255, 255))
 
         self._appear = 0.0
         self._grow = QVariantAnimation(self)
@@ -4328,8 +7139,26 @@ class DeviceTile(QWidget, _Fader):
 
     def mouseMoveEvent(self, e):
         self._spot = QPointF(e.position())
+        over = self._power_rect().adjusted(-3, -3, 3, 3).contains(self._spot)
+        self.setCursor(Qt.PointingHandCursor if over else Qt.ArrowCursor)
         self.update()
         super().mouseMoveEvent(e)
+
+    def mousePressEvent(self, e):
+        if e.button() == Qt.LeftButton and self._power_rect().adjusted(
+                -3, -3, 3, 3).contains(QPointF(e.position())):
+            if time.monotonic() < self._removing_until:
+                return
+            if time.monotonic() < self._confirm_until:
+                self._confirm_until = 0.0
+                self._removing_until = time.monotonic() + 25.0
+                self.setCursor(Qt.ArrowCursor)
+                self.disconnect_requested.emit(self.dev)
+            else:
+                self._confirm_until = time.monotonic() + 3.0
+            self.update()
+            return
+        super().mousePressEvent(e)
 
     def enterEvent(self, e):
         self._fade_to(1.0)
@@ -4371,6 +7200,50 @@ class DeviceTile(QWidget, _Fader):
             else:
                 p.setBrush(QColor(255, 255, 255, 26 + int(14 * self._hover)))
             p.drawRoundedRect(r, r.height() / 2, r.height() / 2)
+
+    def _power_rect(self) -> QRectF:
+        """Where the disconnect control lives: a chip when wide, a glyph when narrow."""
+        w = self.width()
+        if w >= 260:
+            return QRectF(w - 108, 74, 92, 20)
+        return QRectF(w - 30, 72, 22, 22)
+
+    def _paint_disconnect(self, p):
+        rect = self._power_rect()
+        now = time.monotonic()
+        confirming = now < self._confirm_until
+        removing = now < self._removing_until
+        hot = (self._hover > 0.4 and not removing
+               and rect.adjusted(-4, -4, 4, 4).contains(self._spot))
+        amber = QColor(255, 176, 92, 235)
+        if self.width() >= 260:
+            p.setBrush(amber if (confirming or removing) else
+                       QColor(255, 255, 255, 20 + int(18 * hot)))
+            p.setPen(QPen(amber if (confirming or removing) else
+                          QColor(255, 255, 255, 62 + int(46 * hot)), 1.0))
+            p.drawRoundedRect(rect, rect.height() / 2, rect.height() / 2)
+            icon = self._power_hot if (hot or confirming) else self._power_icon
+            icon.paint(p, QRect(int(rect.left()) + 9, int(rect.top()) + 5, 10, 10))
+            p.setFont(ui_font(7, QFont.Weight.Bold, False, 1.15))
+            p.setPen(QColor(40, 26, 16) if (confirming or removing)
+                     else QColor(255, 255, 255, 234))
+            p.drawText(rect.adjusted(22, 0, -4, 0), Qt.AlignCenter,
+                       "REMOVING…" if removing else
+                       "CONFIRM?" if confirming else "DISCONNECT")
+            return
+        p.setBrush(amber if (confirming or removing) else
+                   QColor(255, 255, 255, 20 + int(18 * hot)))
+        p.setPen(QPen(amber if (confirming or removing) else
+                      QColor(255, 255, 255, 68 + int(48 * hot)), 1.0))
+        p.drawEllipse(rect)
+        if confirming or removing:
+            p.setFont(ui_font(11 if removing else 12, QFont.Weight.Bold, True))
+            p.setPen(QColor(40, 26, 16))
+            p.drawText(rect, Qt.AlignCenter, "…" if removing else "!")
+        else:
+            icon = self._power_hot if hot else self._power_icon
+            icon.paint(p, QRect(int(rect.center().x()) - 5, int(rect.center().y()) - 5,
+                                10, 10))
 
     def _paint_pill(self, p, rect: QRectF):
         p.setPen(QPen(self._tint(120), 1))
@@ -4477,7 +7350,7 @@ class DeviceTile(QWidget, _Fader):
             self._disc(p, QRectF(10, 13, 40, 40), 28)
             nx = 60
             p.setFont(ui_font(12, QFont.Weight.Bold))
-            name_rect = QRectF(nx, 12, w - nx - 12, 19)
+            name_rect = QRectF(nx, 12, max(24, w - nx - 12), 19)
 
         name = p.fontMetrics().elidedText(d.name, Qt.ElideRight, int(name_rect.width()))
         self._text(p, name_rect, Qt.AlignLeft | Qt.AlignVCenter, name, QColor(255, 255, 255))
@@ -4497,7 +7370,9 @@ class DeviceTile(QWidget, _Fader):
             self._text(p, QRectF(bx, 20, 136, 36), Qt.AlignRight | Qt.AlignVCenter, value,
                        QColor(255, 255, 255))
             self._paint_battery(p, QRectF(bx, 66, 136, 6), d.battery)
-            self._paint_pill(p, QRectF(nx, 62, 104, 18))
+            if w >= 420:
+                self._paint_pill(p, QRectF(nx, 62, 104, 18))
+            self._paint_disconnect(p)
             return
 
         if w - nx - 52 >= 46:
@@ -4507,13 +7382,14 @@ class DeviceTile(QWidget, _Fader):
         p.setFont(ui_font(12, QFont.Weight.Bold))
         self._text(p, QRectF(w - 56, 46, 45, 14), Qt.AlignRight | Qt.AlignVCenter, value,
                    QColor(255, 255, 255, 235))
-        self._paint_battery(p, QRectF(nx, 62, w - nx - 14, 5), d.battery)
-        self._paint_pill(p, QRectF(nx, 74, min(104.0, w - nx - 14), 18))
+        self._paint_battery(p, QRectF(12, 64, w - 24, 5), d.battery)
+        self._paint_disconnect(p)
 
 
 class BluetoothPage(QWidget):
     """Connected audio devices as a row of live glass cards."""
 
+    disconnect_requested = Signal(object)
     GAP = 10
     TOP = 42
     CARD_H = 100
@@ -4567,7 +7443,9 @@ class BluetoothPage(QWidget):
         devices = devices[: self.SLOTS]
         ids = {d.id for d in devices}
         for gone in [k for k in self.tiles if k not in ids]:
-            self.tiles.pop(gone).deleteLater()
+            stale = self.tiles.pop(gone)
+            stale.hide()
+            stale.deleteLater()
 
         fresh = set()
         for d in devices:
@@ -4576,6 +7454,7 @@ class BluetoothPage(QWidget):
                 tile = self.tiles[d.id] = DeviceTile(d)
                 tile.setParent(self)
                 tile.set_tints(self._c1, self._c2)
+                tile.disconnect_requested.connect(self.disconnect_requested)
                 fresh.add(d.id)
             else:
                 tile.set_device(d)
@@ -4768,6 +7647,12 @@ class ActionButton(QAbstractButton, _Fader, _Reveal):
         self._font = ui_font(10, QFont.Weight.DemiBold, True, 0.3)
         self._label, self._variant = label, variant
         self._init_fader()
+
+    def set_icon(self, kind: str):
+        icon = create_icon_pixmap(kind, 13)
+        if icon.cacheKey() != self._icon.cacheKey():
+            self._icon = icon
+            self.update()
 
     def set_label(self, label: str):
         if label != self._label:
@@ -5649,6 +8534,159 @@ class CaptureSettings(QWidget):
                    QPointF(card.right() - 14, card.top() + 318))
 
 
+class InnerSettings(QWidget):
+    """In-island settings. Each section (Focus / Agent / Bluetooth / Capture) gets its own
+    compact grid of glass rows inside the notch, so nothing opens in a floating window."""
+
+    SECTION_TABS = {"focus": 1, "agent": 2, "bluetooth": 3, "capture": 4}
+
+    changed = Signal(str, object)
+    toggled = Signal(str)
+    folder_requested = Signal()
+    focus_preset = Signal(object)
+    pin_toggled = Signal(bool)
+    startup_toggled = Signal(bool)
+    menu_busy = Signal(bool)
+
+    ROW_W, ROW_H, CTRL_W, CTRL_H = 282, 24, 150, 20      # keeps 30px side / 10px bottom margins
+    COL_X = (30, 330)                                  # clear of the notch's rounded corners
+    ROW_Y = (4, 30, 56, 82)
+
+    def __init__(self):
+        super().__init__()
+        self.setFixedSize(W, H - DETAIL_TOP)
+        self._section = "capture"
+        self._mic_names: list[str] = []
+        cw, ch = self.CTRL_W, self.CTRL_H
+        self.quality = SegmentedControl(
+            [(v, "Max" if lab == "Maximum" else lab) for v, lab in _QUALITY_CHOICES], cw, ch)
+        self.fps = SegmentedControl([(v, str(v)) for v in _FPS_CHOICES], cw, ch)
+        self.timer = SegmentedControl(
+            [(v, "Off" if not v else f"{v}s") for v in _TIMER_CHOICES], cw, ch)
+        self.mic = PickerButton("Off", cw, ch)
+        self.switch_audio = SettingSwitch()
+        self.switch_pointer = SettingSwitch()
+        self.switch_clipboard = SettingSwitch()
+        self.folder = LinkRow("folder", "Open captures folder", self.ROW_W)
+        self.folder.setFixedSize(self.ROW_W, self.ROW_H)
+        self.preset = SegmentedControl([(m, f"{m}m") for m in FocusTimer.PRESETS], cw, ch)
+        self.switch_pin = SettingSwitch()
+        self.switch_startup = SettingSwitch()
+
+        # section -> [(slot, label, widget)]; slots run down the left column, then the right
+        self._layout = {
+            "focus": [(0, "Session length", self.preset), (4, "Keep island open", self.switch_pin),
+                      (5, "Start with Windows", self.switch_startup)],
+            "agent": [(0, "Keep island open", self.switch_pin),
+                      (1, "Start with Windows", self.switch_startup)],
+            "bluetooth": [(0, "Keep island open", self.switch_pin),
+                          (1, "Start with Windows", self.switch_startup)],
+            "capture": [(0, "Quality", self.quality), (1, "Frame rate", self.fps),
+                        (2, "Timer", self.timer), (3, "Microphone", self.mic),
+                        (4, "System audio", self.switch_audio),
+                        (5, "Show pointer", self.switch_pointer),
+                        (6, "Copy to clipboard", self.switch_clipboard),
+                        (7, "", self.folder)],
+        }
+        for rows in self._layout.values():
+            for slot, _label, widget in rows:
+                widget.setParent(self)
+                x, y = self._slot_pos(slot)
+                if widget is self.folder:
+                    widget.move(x, y)
+                else:
+                    widget.move(x + self.ROW_W - 8 - widget.width(),
+                                y + (self.ROW_H - widget.height()) // 2)
+                widget.hide()
+
+        self.quality.changed.connect(partial(self.changed.emit, "quality"))
+        self.fps.changed.connect(partial(self.changed.emit, "fps"))
+        self.timer.changed.connect(partial(self.changed.emit, "timer"))
+        self.mic.clicked.connect(self._pick_mic)
+        self.switch_audio.toggled.connect(lambda _on: self.toggled.emit("system_audio"))
+        self.switch_pointer.toggled.connect(lambda _on: self.toggled.emit("pointer"))
+        self.switch_clipboard.toggled.connect(lambda _on: self.toggled.emit("clipboard"))
+        self.folder.clicked.connect(self.folder_requested)
+        self.preset.changed.connect(self.focus_preset)
+        self.switch_pin.toggled.connect(self.pin_toggled)
+        self.switch_startup.toggled.connect(self.startup_toggled)
+
+    def _slot_pos(self, slot: int):
+        return self.COL_X[slot // 4], self.ROW_Y[slot % 4]
+
+    # --------------------------------------------------------------- state #
+    def set_section(self, name: str):
+        self._section = name if name in self._layout else "capture"
+        for rows in self._layout.values():
+            for _slot, _label, widget in rows:
+                widget.hide()
+        for _slot, _label, widget in self._layout[self._section]:
+            widget.show()
+        self.update()
+
+    def set_mic_names(self, names):
+        self._mic_names = list(names)
+
+    def set_options(self, opt):
+        self.quality.set_value(opt.quality)
+        self.fps.set_value(opt.fps)
+        self.timer.set_value(opt.timer)
+        self.switch_audio.setChecked(opt.system_audio)
+        self.switch_pointer.setChecked(opt.pointer)
+        self.switch_clipboard.setChecked(opt.clipboard)
+        self.mic.set_label(opt.mic_label())
+
+    def set_preset(self, minutes):
+        self.preset.set_value(minutes)
+
+    def set_general(self, pinned: bool, startup: bool):
+        self.switch_pin.setChecked(pinned)
+        self.switch_startup.setChecked(startup)
+
+    def _pick_mic(self):
+        menu = _menu_style(QMenu(self))
+        current = self.mic._label
+        for label, value in (("Off", ""), ("System default", "default")):
+            action = menu.addAction(label)
+            action.setCheckable(True)
+            action.setChecked(current == label)
+            action.triggered.connect(partial(self._choose_mic, label, value))
+        if self._mic_names:
+            menu.addSeparator()
+        for name in self._mic_names:
+            action = menu.addAction(name)
+            action.setCheckable(True)
+            action.setChecked(current == name)
+            action.triggered.connect(partial(self._choose_mic, name, name))
+        self.menu_busy.emit(True)
+        menu.exec(self.mic.mapToGlobal(QPoint(self.mic.width() - 8, self.mic.height())))
+        self.menu_busy.emit(False)
+
+    def _choose_mic(self, label: str, value: str):
+        self.mic.set_label(label)
+        self.changed.emit("mic", value)
+
+    # ---------------------------------------------------------------- paint #
+    def paintEvent(self, _e):
+        p = QPainter(self)
+        p.setRenderHints(QPainter.Antialiasing | QPainter.TextAntialiasing)
+        p.setFont(ui_font(10, QFont.Weight.Medium, False, 0.2))
+        for slot, label, widget in self._layout[self._section]:
+            if widget is self.folder:
+                continue
+            x, y = self._slot_pos(slot)
+            row = QRectF(x, y, self.ROW_W, self.ROW_H).adjusted(0.5, 0.5, -0.5, -0.5)
+            g = QLinearGradient(row.topLeft(), row.bottomLeft())
+            g.setColorAt(0.0, QColor(255, 255, 255, 30))
+            g.setColorAt(1.0, QColor(255, 255, 255, 12))
+            p.setPen(QPen(QColor(255, 255, 255, 40), 1))
+            p.setBrush(g)
+            p.drawRoundedRect(row, 12, 12)
+            p.setPen(QColor(255, 255, 255, 220))
+            p.drawText(QRectF(x + 14, y, self.ROW_W - widget.width() - 30, self.ROW_H),
+                       Qt.AlignLeft | Qt.AlignVCenter, label)
+
+
 # --------------------------------------------------------------------------- #
 # The island
 # --------------------------------------------------------------------------- #
@@ -5676,6 +8714,7 @@ class LiquidIsland(QWidget):
         self._duration = 0.0
         self._pos_base = 0.0
         self._pos_t0 = time.monotonic()
+        self._seek_hold = 0.0
         self._title = self._artist = self._album = ""
         self._art_sig = None
         self._dragging = False
@@ -5694,6 +8733,17 @@ class LiquidIsland(QWidget):
         self._audio = None
         self._hud_paused = False
         self._rec_muted = False
+
+        self.focus = FocusTimer(self)
+        self.focus.changed.connect(self._refresh_focus)
+        self.focus.finished.connect(self._on_focus_finished)
+        self._agent: dict = {}
+        self._agent_busy = False
+        self._detail_kind = ""
+        self._lyrics_key = ""
+        self._lyrics_threads = set()
+        self._art_raw = QPixmap()
+        self._weather_state = None
 
         self._backdrop = QPixmap()
         self._backdrop_rect = QRect()
@@ -5762,6 +8812,10 @@ class LiquidIsland(QWidget):
         self.hud_timer.setInterval(150)
         self.hud_timer.timeout.connect(self._refresh_hud)
         self.hud_timer.start()
+        self.pill_timer = QTimer(self)               # drives Robo + the glowing edge when collapsed
+        self.pill_timer.setInterval(50)
+        self.pill_timer.timeout.connect(self._pill_tick)
+        self.pill_timer.start()
 
         self.update_battery()
         self.update_clock()
@@ -5773,26 +8827,40 @@ class LiquidIsland(QWidget):
         self.worker = MediaWorker(self)
         self.worker.state_changed.connect(self.apply_state)
         self.worker.bluetooth_changed.connect(self.bluetooth_page.set_devices)
+        self.worker.bluetooth_changed.connect(self.agent_card.set_devices)
+        self.agent_card.bt_disconnect.connect(self.worker.disconnect_device)
         self.worker.weather_changed.connect(self.weather.set_state)
+        self.worker.weather_changed.connect(self._on_weather)
+        self.worker.bt_notice.connect(lambda msg: self._notify("Bluetooth", msg))
+        self.bluetooth_page.disconnect_requested.connect(self.worker.disconnect_device)
         self.worker.start()
+
+        self.agent_watch = AgentWatcher(self)
+        self.agent_watch.state.connect(self._apply_agent)
+        self.agent_watch.start()
 
     # ------------------------------------------------------------------ UI #
     def _build_ui(self):
         self.content = QWidget(self)
         self.content.setFixedSize(W, H)
+        self._cue = create_icon_pixmap("chevron", 9, QColor(255, 255, 255, 112))
 
         self.tab_island = TabButton("island", "Island")
+        self.tab_focus = TabButton("timer", "Focus")
+        self.tab_agent = TabButton("sparkle", "Agent")
         self.tab_bt = TabButton("bluetooth", "Bluetooth")
         self.tab_capture = TabButton("camera", "Capture")
-        for t in (self.tab_island, self.tab_bt, self.tab_capture):
-            t.setParent(self.content)
-        self.tab_island.move(12, 6)
-        self.tab_bt.move(self.tab_island.x() + self.tab_island.width() + 6, 6)
-        self.tab_capture.move(self.tab_bt.x() + self.tab_bt.width() + 6, 6)
+        self.tabs = (self.tab_island, self.tab_focus, self.tab_agent,
+                     self.tab_bt, self.tab_capture)
+        nav_x = 12
+        for tab in self.tabs:
+            tab.setParent(self.content)
+            tab.move(nav_x, 6)
+            nav_x += tab.width() + 4
+        self._nav_rect = QRectF(8, 3, nav_x - 8, 31)      # 4px of tray after the last tab, like the left side
         self.tab_island.setChecked(True)
-        self.tab_island.clicked.connect(lambda: self.show_tab(0))
-        self.tab_bt.clicked.connect(lambda: self.show_tab(1))
-        self.tab_capture.clicked.connect(lambda: self.show_tab(2))
+        for tab_index, tab in enumerate(self.tabs):
+            tab.clicked.connect(partial(self.show_tab, tab_index))
 
         self.gear = GhostButton("gear", QSize(26, 26), 16)
         self.gear.setParent(self.content)
@@ -5808,6 +8876,8 @@ class LiquidIsland(QWidget):
         self.shot_btn.move(self.rec_btn.x() - 32, 5)
         self.shot_btn.clicked.connect(self.take_screenshot)
         self.rec_btn.clicked.connect(self.toggle_recording)
+        self._cap_rect = QRectF(self.shot_btn.x() - 4, 3,
+                                self.gear.x() + self.gear.width() + 8 - self.shot_btn.x(), 31)
 
         self.rec_indicator = RecIndicator()
         self.rec_indicator.setParent(self.content)
@@ -5819,7 +8889,7 @@ class LiquidIsland(QWidget):
 
         self.art_widget = ArtWidget()
         self.art_widget.setParent(self.home_page)
-        self.art_widget.move(ART_POS - QPoint(ART_M, ART_M))
+        self.art_widget.move(QPoint(MUSIC_CARD.x() + 4 - ART_M, MUSIC_CARD.y() + 4 - ART_M))
         self.art_widget.clicked.connect(self.open_media_app)
 
         self.title_label = GlassText(15, QFont.Weight.Bold, QColor(226, 230, 244), display=True,
@@ -5831,17 +8901,24 @@ class LiquidIsland(QWidget):
         for lbl, (y, hh) in zip((self.title_label, self.album_label, self.artist_label),
                                 ((45, 19), (64, 15), (79, 13))):
             lbl.setParent(self.home_page)
-            lbl.setGeometry(TEXT_X, y, TEXT_W, hh)
+            lbl.setGeometry(HX, y, HW, hh)
 
         self.media_hit = ClickArea(self.home_page)
-        self.media_hit.setGeometry(TEXT_X, 45, TEXT_W, 46)
-        self.media_hit.clicked.connect(self.open_media_app)
+        self.media_hit.setGeometry(HX, 45, HW, 46)
+        self.media_hit.setToolTip("Open lyrics")
+        self.media_hit.clicked.connect(lambda: self._open_detail("media"))
+
+        # The eyebrow above the track still opens the lyrics / player page.
+        self.media_head_hit = ClickArea(self.home_page)
+        self.media_head_hit.setGeometry(0, 0, 0, 0)
+        self.media_head_hit.hide()
+        self.media_head_hit.clicked.connect(lambda: self._open_detail("media"))
 
         self.prev_btn = GhostButton("prev", QSize(26, 26), 13)
         self.play_btn = GhostButton("play", QSize(34, 26), 15, solid=True)
         self.next_btn = GhostButton("next", QSize(26, 26), 13)
-        for b, x in ((self.prev_btn, TEXT_X - 2), (self.play_btn, TEXT_X + 25),
-                     (self.next_btn, TEXT_X + 60)):
+        for b, x in ((self.prev_btn, HX - 2), (self.play_btn, HX + 25),
+                     (self.next_btn, HX + 60)):
             b.setParent(self.home_page)
             b.move(x, 91)
         self.prev_btn.clicked.connect(lambda: self.worker.command("prev"))
@@ -5850,12 +8927,12 @@ class LiquidIsland(QWidget):
 
         self.eq = Equalizer()
         self.eq.setParent(self.home_page)
-        self.eq.move(TEXT_X + TEXT_W - self.eq.width() + 3, 93)
+        self.eq.move(HX + HW - self.eq.width() + 3, 93)
         self.eq.clicked.connect(self._on_toggle_mute)
 
         self.slider = SeekSlider()
         self.slider.setParent(self.home_page)
-        self.slider.setGeometry(TEXT_X - ES_PAD, 119, TEXT_W + 2 * ES_PAD, 12)
+        self.slider.setGeometry(HX - ES_PAD, 119, HW + 2 * ES_PAD, 12)
         self.slider.stretched.connect(self._on_slider_stretch)
         self.slider.sliderPressed.connect(lambda: setattr(self, "_dragging", True))
         self.slider.sliderMoved.connect(
@@ -5868,8 +8945,8 @@ class LiquidIsland(QWidget):
                                           align=Qt.AlignRight)
         self.current_time_label.setParent(self.home_page)
         self.total_time_label.setParent(self.home_page)
-        self.current_time_label.setGeometry(TEXT_X, 130, 50, 12)
-        self.total_time_label.setGeometry(TEXT_X + TEXT_W - 50, 130, 50, 12)
+        self.current_time_label.setGeometry(HX, 130, 50, 12)
+        self.total_time_label.setGeometry(HX + HW - 50, 130, 50, 12)
         self.current_time_label.set_full_text("0:00")
         self.total_time_label.set_full_text("0:00")
 
@@ -5878,24 +8955,60 @@ class LiquidIsland(QWidget):
             d = Divider()
             d.setParent(self.home_page)
             d.move(x, 46)
+            d.hide()
             self.dividers.append(d)
 
         self.calendar = CalendarColumn()
         self.calendar.setParent(self.home_page)
         self.calendar.move(CAL_RECT.topLeft())
+        self.calendar.hide()
 
         self.weather = WeatherChip()
         self.weather.setParent(self.home_page)
         self.weather.move(CAL_RECT.x(), CAL_RECT.y() + 53)
+        self.weather.hide()
 
         self.ring = RingGauge()
         self.ring.setParent(self.home_page)
-        self.ring.move(RING_RECT.topLeft())
+        self.ring.move(HOME_RING)
+
+        self.calendar_hit = ClickArea(self.home_page)
+        self.calendar_hit.setGeometry(DATE_RECT)
+        self.calendar_hit.setCursor(Qt.PointingHandCursor)
+        self.calendar_hit.setToolTip("Expand today")
+        self.calendar_hit.clicked.connect(lambda: self._open_detail("info"))
+        self.ring_hit = ClickArea(self.home_page)
+        self.ring_hit.setGeometry(QRect(HOME_RING, RING_RECT.size()))
+        self.ring_hit.setCursor(Qt.PointingHandCursor)
+        self.ring_hit.setToolTip("Expand system")
+        self.ring_hit.clicked.connect(lambda: self._open_detail("clock"))
+
+        self.agent_card = AgentCard()
+        self.agent_card.setParent(self.home_page)
+        self.agent_card.move(AGENT_CARD.topLeft())
+        self.agent_card.setToolTip("Open the agent view")
+        self.agent_card.clicked.connect(lambda: self.show_tab(2))
+        self.agent_card.set_focus(self.focus)
+        self.agent_card.focus_clicked.connect(self.focus.toggle)
+        self.agent_card.bt_clicked.connect(lambda: self.show_tab(3))
 
         self.bluetooth_page = BluetoothPage()
         self.bluetooth_page.setParent(self.content)
         self.bluetooth_page.move(0, 0)
         self.bluetooth_page.hide()
+
+        self.focus_page = FocusPage()
+        self.focus_page.setParent(self.content)
+        self.focus_page.move(0, 0)
+        self.focus_page.hide()
+        self.focus_page.preset_changed.connect(self.focus.set_preset)
+        self.focus_page.primary_clicked.connect(self.toggle_focus)
+        self.focus_page.reset_clicked.connect(self.focus.reset)
+
+        self.agent_page = AgentPage()
+        self.agent_page.setParent(self.content)
+        self.agent_page.move(0, 0)
+        self.agent_page.hide()
 
         self.capture_page = CapturePage()
         self.capture_page.setParent(self.content)
@@ -5906,6 +9019,40 @@ class LiquidIsland(QWidget):
         self.capture_page.record_clicked.connect(self.toggle_recording)
         self.capture_page.options_clicked.connect(self.open_capture_options)
 
+        self.detail = DetailPage()
+        self.detail.setParent(self.content)
+        self.detail.move(0, DETAIL_TOP)
+        self.detail.hide()
+        self.detail.command.connect(self._on_detail_command)
+
+        self.back_btn = GhostButton("back", QSize(26, 26), 13)
+        self.back_btn.setParent(self.content)
+        self.back_btn.move(int(self._nav_rect.right()) + 3, 5)   # sits in the nav tray's end
+        self.back_btn.setToolTip("Back")
+        self.back_btn.clicked.connect(self._on_back)
+        self.back_btn.hide()
+
+        # inner settings: one compact view per section, opened from the button in the nav gap
+        self._tab_index = 0
+        self.inner = InnerSettings()
+        self.inner.setParent(self.content)
+        self.inner.move(0, DETAIL_TOP)
+        self.inner.hide()
+        self.inner.changed.connect(self._set_option)
+        self.inner.toggled.connect(self._toggle_option)
+        self.inner.folder_requested.connect(self._open_capture_folder)
+        self.inner.focus_preset.connect(self.focus.set_preset)
+        self.inner.pin_toggled.connect(lambda on: setattr(self, "_pinned", bool(on)))
+        self.inner.startup_toggled.connect(self._inner_startup)
+        self.inner.menu_busy.connect(lambda busy: setattr(self, "_menu_open", bool(busy)))
+        self.inner_btn = GhostButton("sliders", QSize(26, 26), 13)
+        self.inner_btn.setParent(self.content)
+        self.inner_btn.move(self.back_btn.pos())
+        self.inner_btn.setToolTip("Settings for this section")
+        self.inner_btn.clicked.connect(
+            lambda: self.open_inner(self.INNER_KEYS[self._tab_index]))
+        self.inner_btn.hide()
+
         self.rec_hud = RecHud()
         self.rec_hud.setParent(self)
         self.rec_hud.move(0, 0)
@@ -5915,18 +9062,19 @@ class LiquidIsland(QWidget):
         self.rec_hud.mute_clicked.connect(self.toggle_recording_mute)
 
         self.title_label.set_full_text("Nothing playing")
-        self.home_page.lower()
-        self.bluetooth_page.lower()
-        self.capture_page.lower()
+        for page in (self.home_page, self.focus_page, self.agent_page,
+                     self.bluetooth_page, self.capture_page):
+            page.lower()
 
-        self.tab_island.raise_()
-        self.tab_bt.raise_()
-        self.tab_capture.raise_()
+        for tab in self.tabs:
+            tab.raise_()
         self.gear.raise_()
         self.shot_btn.raise_()
         self.rec_btn.raise_()
         self.rec_indicator.raise_()
+        self.back_btn.raise_()
         self._refresh_capture_status()
+        self._refresh_focus()
 
         self._fx_widgets = (self.title_label, self.album_label, self.artist_label,
                             self.art_widget, self.eq, self.slider, self.ring)
@@ -5962,6 +9110,8 @@ class LiquidIsland(QWidget):
         self.tray_shot.triggered.connect(self.take_screenshot)
         self.tray_rec = QAction("Record screen", self.tray_menu)
         self.tray_rec.triggered.connect(self.toggle_recording)
+        self.tray_focus = QAction(f"Focus {self.focus.preset} min", self.tray_menu)
+        self.tray_focus.triggered.connect(self.toggle_focus)
         self.tray_pause = QAction("Pause recording", self.tray_menu)
         self.tray_pause.triggered.connect(self.toggle_pause)
         self.tray_mute = QAction("Mute recording audio", self.tray_menu)
@@ -5976,6 +9126,7 @@ class LiquidIsland(QWidget):
         q.triggered.connect(QApplication.quit)
         self.tray_menu.addAction(self.tray_shot)
         self.tray_menu.addAction(self.tray_rec)
+        self.tray_menu.addAction(self.tray_focus)
         self.tray_menu.addAction(self.tray_pause)
         self.tray_menu.addAction(self.tray_mute)
         self.tray_menu.addAction(self.tray_options)
@@ -5988,33 +9139,43 @@ class LiquidIsland(QWidget):
         self.tray.setContextMenu(self.tray_menu)
         self.tray.show()
 
+    PAGE_ORDER = ("home_page", "focus_page", "agent_page", "bluetooth_page", "capture_page")
+
+    INNER_KEYS = ("", "focus", "agent", "bluetooth", "capture")
+
     def show_tab(self, index: int):
-        self.tab_island.setChecked(index == 0)
-        self.tab_bt.setChecked(index == 1)
-        self.tab_capture.setChecked(index == 2)
-
-        self.home_page.setVisible(index == 0)
-        self.bluetooth_page.setVisible(index == 1)
-        self.capture_page.setVisible(index == 2)
-
-        self.home_page.lower()
-        self.bluetooth_page.lower()
-        self.capture_page.lower()
-
-        self.tab_island.raise_()
-        self.tab_bt.raise_()
-        self.tab_capture.raise_()
+        if not self.detail.isHidden():
+            self.detail.hide()
+            self.back_btn.hide()
+            self._detail_kind = ""
+        if not self.inner.isHidden():
+            self.inner.hide()
+            self.back_btn.hide()
+        index = max(0, min(len(self.PAGE_ORDER) - 1, index))
+        self._tab_index = index
+        for tab_index, tab in enumerate(self.tabs):
+            tab.setChecked(tab_index == index)
+        for page_index, name in enumerate(self.PAGE_ORDER):
+            page = getattr(self, name)
+            page.setVisible(page_index == index)
+            page.lower()
+        for tab in self.tabs:
+            tab.raise_()
         self.gear.raise_()
         self.shot_btn.raise_()
         self.rec_btn.raise_()
         self.rec_indicator.raise_()
+        self.inner_btn.setVisible(index > 0)
+        self.inner_btn.raise_()
 
-        if index == 0:
+        if index in (0, 1, 2):
             self._reveal_t = 0.0
             self._apply_reveal()
         if index == 1:
+            self._refresh_focus()
+        if index == 3:
             self.worker.refresh_bluetooth()
-        if index == 2:
+        if index == 4:
             self._refresh_capture_status()
 
     def open_menu(self):
@@ -6061,6 +9222,8 @@ class LiquidIsland(QWidget):
 
     def _sync_tray_menu(self):
         self.tray_rec.setText("Stop recording" if self._recorder is not None else "Record screen")
+        self.tray_focus.setText("Stop focus session" if self.focus.active
+                                else f"Focus {self.focus.preset} min")
         self.tray_shot.setEnabled(not self._capture_busy)
         self.tray_pause.setVisible(self._recorder is not None)
         self.tray_pause.setText("Resume recording" if self._hud_paused else "Pause recording")
@@ -6102,6 +9265,7 @@ class LiquidIsland(QWidget):
         self._refresh_capture_status()
         if self._settings is not None:
             self._settings.set_options(self._options)
+        self.inner.set_options(self._options)
 
     def _toggle_option(self, key: str):
         self._set_option(key, not bool(getattr(self._options, key)))
@@ -6116,21 +9280,57 @@ class LiquidIsland(QWidget):
             pass
 
     def open_capture_options(self):
-        if self._settings is not None and self._settings.isVisible():
-            self._settings.close_panel()
+        """Capture options now live inside the island (inner settings, Capture section)."""
+        if not self.inner.isHidden() and self.inner._section == "capture":
+            self._close_inner()
             return
-        if self._settings is None:
-            panel = CaptureSettings()
-            panel.changed.connect(self._set_option)
-            panel.toggled.connect(self._toggle_option)
-            panel.folder_requested.connect(self._open_capture_folder)
-            panel.closed.connect(self._on_settings_closed)
-            self._settings = panel
-        self._settings.set_mic_names(microphone_names())
-        self._settings.set_options(self._options)
-        self._settings.position_near(self._expanded_rect())
-        self._menu_open = True
-        self._settings.show_panel()
+        self.open_inner("capture")
+
+    def open_inner(self, section: str):
+        if section not in InnerSettings.SECTION_TABS:
+            return
+        if not self._expanded:
+            self.expand()
+        if not self.detail.isHidden():
+            self.detail.hide()
+            self._detail_kind = ""
+        self._tab_index = InnerSettings.SECTION_TABS[section]
+        self.inner.set_section(section)
+        if section == "capture":
+            self.inner.set_mic_names(microphone_names())
+        self.inner.set_options(self._options)
+        self.inner.set_preset(self.focus.preset)
+        self.inner.set_general(self._pinned, is_autostart_enabled())
+        for name in self.PAGE_ORDER:
+            getattr(self, name).setVisible(False)
+        for tab_index, tab in enumerate(self.tabs):
+            tab.setChecked(tab_index == self._tab_index)
+        self.inner.show()
+        self.inner.raise_()
+        self.inner_btn.hide()
+        self.back_btn.show()
+        self.back_btn.raise_()
+        for tab in self.tabs:
+            tab.raise_()
+        self.update()
+
+    def _close_inner(self):
+        if self.inner.isHidden():
+            return
+        self.inner.hide()
+        self.back_btn.hide()
+        self.show_tab(self._tab_index)
+
+    def _on_back(self):
+        if not self.inner.isHidden():
+            self._close_inner()
+        else:
+            self._close_detail()
+
+    def _inner_startup(self, on: bool):
+        if not set_autostart(bool(on)):
+            self._notify("Autostart failed", "Windows blocked the startup entry")
+            self.inner.set_general(self._pinned, is_autostart_enabled())
 
     def _on_settings_closed(self):
         self._menu_open = False
@@ -6318,6 +9518,11 @@ class LiquidIsland(QWidget):
         except Exception:
             pass
 
+    def _pill_tick(self):
+        if (not self._expanded and self._pill_clear and self.isVisible()
+                and not self.rec_hud.isVisible()):
+            self.update()
+
     def _refresh_hud(self):
         if self._recorder is None:
             return
@@ -6361,11 +9566,169 @@ class LiquidIsland(QWidget):
     def _on_toggle_mute(self):
         muted = toggle_system_mute()
         self.eq.set_muted(muted)
+        detail = getattr(self, "detail", None)
+        if detail is not None:
+            detail.set_muted(muted)
 
     def _sync_mute_state(self):
         muted = get_system_mute()
         if muted is not None:
             self.eq.set_muted(muted)
+            detail = getattr(self, "detail", None)
+            if detail is not None:
+                detail.set_muted(muted)
+
+    # ------------------------------------------------------- focus + agent --#
+    def toggle_focus(self):
+        self.focus.toggle()
+        if self.focus.active:
+            self._peek(5.0)
+        self._refresh_focus()
+
+    def _refresh_focus(self):
+        page = getattr(self, "focus_page", None)
+        if page is not None:
+            page.set_state(self.focus)
+        try:
+            self.tray_focus.setText("Stop focus session" if self.focus.active
+                                    else f"Focus {self.focus.preset} min")
+        except Exception:
+            pass
+        self.update()
+
+    def _on_focus_finished(self):
+        play_chime()
+        self._notify("Focus complete", f"{self.focus.preset} minutes done — take a break")
+        page = getattr(self, "focus_page", None)
+        if page is not None:
+            page.celebrate()
+        self._peek(9.0)
+
+    def _peek(self, seconds: float):
+        """Let the pill sit at the top edge for a moment so a change is noticed."""
+        if self._recorder is not None:
+            return
+        self._startup_peek_until = time.monotonic() + max(0.0, float(seconds))
+        self.check_environment(force=True)
+        self.update()
+
+    def _apply_agent(self, snap):
+        self._agent = dict(snap or {})
+        busy = bool(self._agent.get("busy"))
+        page = getattr(self, "agent_page", None)
+        if page is not None:
+            page.set_state(self._agent)
+        card = getattr(self, "agent_card", None)
+        if card is not None:
+            card.set_state(self._agent)
+        if busy and not self._agent_busy:
+            self._peek(6.0)
+        elif not busy and self._agent_busy and self._agent.get("kind"):
+            self._notify(f"{self._agent.get('kind')} finished", "The session went quiet")
+        self._agent_busy = busy
+        self.update()
+
+    # ------------------------------------------------- expandable views --#
+    def _lyrics_cache_key(self) -> str:
+        return (f"{self._artist.strip().lower()}|{self._title.strip().lower()}"
+                f"|{int(self._duration)}")
+
+    def _request_lyrics(self):
+        if not (self._has_media and self._title):
+            return
+        key = self._lyrics_cache_key()
+        if key == self._lyrics_key:
+            return
+        self._lyrics_key = key
+        self.detail.set_lyrics_loading()
+        thread = LyricsFetcher(key, self._title, self._artist, self._album,
+                               self._duration, self)
+        thread.ready.connect(self._on_lyrics)
+        thread.finished.connect(partial(self._lyrics_done, thread))
+        self._lyrics_threads.add(thread)
+        thread.start()
+
+    def _lyrics_done(self, thread):
+        self._lyrics_threads.discard(thread)
+        try:
+            thread.deleteLater()
+        except RuntimeError:
+            pass
+
+    def _on_lyrics(self, payload):
+        if isinstance(payload, dict) and payload.get("key") == self._lyrics_key:
+            self.detail.set_lyrics(payload)
+
+    def _on_weather(self, state):
+        self._weather_state = state
+        if self.detail.isVisible():
+            self._refresh_detail_panel()
+
+    def _refresh_detail_panel(self, now=None):
+        self.detail.set_panel(now or dt.datetime.now(), self._weather_state,
+                              self._battery, _system_stats())
+
+    def _open_detail(self, kind: str):
+        """Swap the active island page for one of the three expanded views."""
+        if not self._expanded:
+            return
+        self._detail_kind = kind
+        self.detail.set_kind(kind)
+        self.detail.set_tints(*self.current_tints())
+        self.detail.set_media(self._title, self._artist, self._album, self._source,
+                              self._playing, self._duration)
+        self.detail.set_playback(self.estimated_position(), self._duration, self._playing)
+        self.detail.set_art(self._art_raw)
+        self._refresh_detail_panel()
+        if kind == "media" and self._has_media and self._lyrics_cache_key() != self._lyrics_key:
+            self._request_lyrics()
+        for name in self.PAGE_ORDER:
+            getattr(self, name).setVisible(False)
+        self.detail.show()
+        self.detail.raise_()
+        self.back_btn.show()
+        self.back_btn.raise_()
+        self.detail.start()
+        self.update()
+
+    def _close_detail(self):
+        if self.detail.isHidden():
+            return
+        self.detail.hide()
+        self.back_btn.hide()
+        self._detail_kind = ""
+        self.show_tab(0)
+
+    def _on_detail_command(self, command):
+        name, arg = command
+        if name == "back":
+            self._close_detail()
+        elif name == "toggle":
+            self.worker.command("toggle")
+        elif name in ("prev", "next"):
+            self.worker.command(name)
+        elif name == "seek":
+            target = clamp01(float(arg or 0.0)) * self._duration
+            self._pos_base, self._pos_t0 = target, time.monotonic()
+            self._dragging = False
+            self._seek_hold = time.monotonic() + 0.9
+            self.worker.command("seek", target)
+            self.detail.set_playback(target, self._duration, self._playing)
+            self.tick_smooth_progress(force=True)
+        elif name == "seek_at":
+            target = max(0.0, float(arg or 0.0))
+            if self._duration > 0:
+                target = min(target, self._duration)
+            self._pos_base, self._pos_t0 = target, time.monotonic()
+            self._dragging = False
+            self._seek_hold = time.monotonic() + 0.9
+            self.worker.command("seek", target)
+            self.detail.set_playback(target, self._duration, self._playing)
+            self.tick_smooth_progress(force=True)
+        elif name == "mute":
+            self._on_toggle_mute()
+        elif name == "open":
+            self.open_media_app()
 
     # ---------------------------------------------------------- geometry --#
     @staticmethod
@@ -6399,11 +9762,11 @@ class LiquidIsland(QWidget):
         self._opening = self._expanded
         if self._opening:
             curve = QEasingCurve(QEasingCurve.OutBack)
-            curve.setOvershoot(0.9)
-            self.anim.setDuration(460)
+            curve.setOvershoot(0.55)                # a softer, more liquid settle
+            self.anim.setDuration(520)
         else:
-            curve = QEasingCurve(QEasingCurve.InOutCubic)
-            self.anim.setDuration(260)
+            curve = QEasingCurve(QEasingCurve.InOutQuart)
+            self.anim.setDuration(320)
         self.anim.setEasingCurve(curve)
         self.anim.start()
 
@@ -6455,6 +9818,15 @@ class LiquidIsland(QWidget):
     def collapse(self):
         self._expanded = False
         self._leave_since = None
+        if not self.detail.isHidden():
+            self.detail.hide()
+            self.back_btn.hide()
+            self._detail_kind = ""
+            self.show_tab(0)         # the home page is still there for the next expand
+        if not self.inner.isHidden():
+            self.inner.hide()
+            self.back_btn.hide()
+            self.show_tab(0)
         self.animate_to(COLLAPSED.width(), COLLAPSED.height(), self._resting_y())
 
     def _on_anim_finished(self):
@@ -6501,10 +9873,15 @@ class LiquidIsland(QWidget):
             or self.slider.isSliderDown()
             or self._pinned
             or self._menu_open
-            or self.tab_bt.underMouse()
-            or self.tab_island.underMouse()
+            or any(tab.underMouse() for tab in self.tabs)
             or self.gear.underMouse()
             or self.bluetooth_page.underMouse()
+                    or self.focus_page.underMouse()
+        or self.agent_page.underMouse()
+        or self.detail.underMouse()
+        or self.back_btn.underMouse()
+        or self.inner.underMouse()
+        or self.inner_btn.underMouse()
         ):
             self._leave_since = None
         elif self._leave_since is None:
@@ -6587,6 +9964,8 @@ class LiquidIsland(QWidget):
         now = dt.datetime.now()
         self.calendar.set_date(now.date())
         self._refresh_ring(now)
+        if self.detail.isVisible():
+            self._refresh_detail_panel(now)
 
     def update_battery(self):
         try:
@@ -6594,6 +9973,8 @@ class LiquidIsland(QWidget):
         except Exception:
             self._battery = None
         self._refresh_ring()
+        if self.detail.isVisible():
+            self._refresh_detail_panel()
 
     def _refresh_ring(self, now=None):
         now = now or dt.datetime.now()
@@ -6609,7 +9990,7 @@ class LiquidIsland(QWidget):
             w.setVisible(on)
         self.art_widget.set_badge(None, not on, "")
         self.art_widget.set_interactive(on)
-        self.title_label.setGeometry(TEXT_X, 45 if on else 68, TEXT_W, 19)
+        self.title_label.setGeometry(HX, 45 if on else 68, HW, 19)
         self.media_hit.setVisible(on)
 
     def open_media_app(self):
@@ -6630,8 +10011,9 @@ class LiquidIsland(QWidget):
 
         if st.has_media:
             changed = (st.title, st.artist, st.album) != (self._title, self._artist, self._album)
+            holding = time.monotonic() < self._seek_hold
             if not self._dragging and (changed or st.playing != was_playing or not st.playing
-                                       or abs(st.position - estimate) > 0.8):
+                                       or (abs(st.position - estimate) > 0.8 and not holding)):
                 self._pos_base, self._pos_t0 = st.position, time.monotonic()
             self._title, self._artist, self._album = st.title, st.artist, st.album
 
@@ -6653,6 +10035,13 @@ class LiquidIsland(QWidget):
         for w in (self.eq, self.slider, self.art_widget):
             w.set_playing(st.has_media and st.playing)
         self.title_label.set_shine(st.has_media and st.playing)
+        self.detail.set_media(self._title, self._artist, self._album, self._source,
+                              self._playing, self._duration)
+        if self._has_media:
+            self._request_lyrics()
+        else:
+            self._lyrics_key = ""
+            self.detail.set_lyrics({"status": "none", "lines": [], "plain": ""})
         self.tick_smooth_progress(force=True)
 
     def _apply_art(self, st: MediaState):
@@ -6663,6 +10052,8 @@ class LiquidIsland(QWidget):
         raw = QPixmap()
         if st.art:
             raw.loadFromData(st.art)
+        self._art_raw = QPixmap(raw)
+        self.detail.set_art(raw)
         self.art_widget.set_art(raw)
         self._tint_from = self.current_tints()
         self._wash_prev, self._wash = self._wash, make_wash(raw)
@@ -6683,8 +10074,13 @@ class LiquidIsland(QWidget):
         self.calendar.set_tints(c1, c2)
         self.ring.set_tints(c1, c2)
         self.weather.set_tints(c1, c2)
+        if getattr(self, "agent_card", None) is not None:
+            self.agent_card.set_tints(c1, c2)
         self.bluetooth_page.set_tints(c1, c2)
         self.capture_page.set_tints(c1, c2)
+        self.focus_page.set_tints(c1, c2)
+        self.agent_page.set_tints(c1, c2)
+        self.detail.set_tints(c1, c2)
 
     def _on_mix(self, v):
         self._mix = float(v)
@@ -6702,6 +10098,9 @@ class LiquidIsland(QWidget):
         if not (self._expanded or force) or self._dragging:
             return
         pos = self.estimated_position()
+        detail = getattr(self, "detail", None)
+        if detail is not None and not detail.isHidden():
+            detail.set_playback(pos, self._duration, self._playing)
         if self._duration > 0:
             self.slider.setValue(int(pos / self._duration * 1000))
         cur = self.format_time(pos)
@@ -6712,8 +10111,8 @@ class LiquidIsland(QWidget):
             self.total_time_label.set_full_text(tot)
 
     def _on_slider_stretch(self, left_dx: float, right_dx: float):
-        self.current_time_label.move(TEXT_X + int(round(left_dx)), 130)
-        self.total_time_label.move(TEXT_X + TEXT_W - 50 + int(round(right_dx)), 130)
+        self.current_time_label.move(HX + int(round(left_dx)), 130)
+        self.total_time_label.move(HX + HW - 50 + int(round(right_dx)), 130)
 
     def _on_slider_released(self):
         target = self.slider.value() / 1000 * self._duration
@@ -6737,7 +10136,8 @@ class LiquidIsland(QWidget):
                 (self.next_btn, 0.24, 0.40), (self.eq, 0.26, 0.40), (self.slider, 0.28, 0.45),
                 (self.current_time_label, 0.30, 0.40), (self.total_time_label, 0.30, 0.40),
                 (self.calendar, 0.10, 0.90), (self.ring, 0.22, 0.80),
-                (self.weather, 0.26, 0.50),
+                (self.weather, 0.26, 0.50), (self.agent_card, 0.02, 0.60),
+                (self.focus_page, 0.04, 0.95), (self.agent_page, 0.04, 0.95),
                 (self.dividers[0], 0.12, 0.5), (self.dividers[1], 0.20, 0.5))
         for w, delay, dur in plan:
             w.set_reveal(seg(R, delay, dur))
@@ -6755,6 +10155,8 @@ class LiquidIsland(QWidget):
         self._energy += ((1.0 if self._playing else 0.45) - self._energy) * min(1.0, dt_ * 2.5)
         for w in self._fx_widgets:
             w.tick(dt_)
+        if self.detail.isVisible() and self._detail_kind == "media":
+            self.detail.set_playback(self.estimated_position(), self._duration, self._playing)
         self.update()
 
     # ------------------------------------------------------------- painting #
@@ -6834,6 +10236,31 @@ class LiquidIsland(QWidget):
         time_str = now.strftime("%I:%M").lstrip("0")
         ampm_str = now.strftime("%p")
         date_str = f"{now:%a} · {now:%b} {now.day}".upper()
+        focus = getattr(self, "focus", None)
+        focus_on = bool(focus is not None and focus.active)
+        agent = getattr(self, "_agent", None) or {}
+        agent_busy = bool(agent.get("busy"))
+        waiting = bool(agent.get("waiting")) and agent_busy
+        dot_col = None
+        if agent_busy:
+            ap_kind = str(agent.get("kind") or "AGENT").upper()
+            if waiting:
+                status_str = f"{ap_kind} · NEEDS YOU"
+            elif agent.get("app") and not agent.get("foreground", True):
+                status_str = f"{ap_kind} · WORKING"
+            else:
+                word = (agent.get("action") or "WORKING").upper()
+                short = (agent.get("detail") or "").strip()
+                status_str = f"{ap_kind} · {word}"
+                if short:
+                    status_str = f"{status_str} {short}"
+            dot_col = QColor(255, 186, 92) if waiting else QColor(178, 146, 255)
+        elif focus_on:
+            status_str = "FOCUS · PAUSED" if focus.paused else "FOCUS SESSION"
+            dot_col = QColor(255, 186, 92) if focus.paused else pastel(c2, 0.78)
+        else:
+            status_str = date_str
+        beat = 0.5 + 0.5 * math.sin(time.monotonic() * 4.2)
 
         p.setFont(ui_font(14, QFont.Weight.Bold, True))
         tw = p.fontMetrics().horizontalAdvance(time_str)
@@ -6854,11 +10281,56 @@ class LiquidIsland(QWidget):
         p.setPen(QPen(QColor(255, 255, 255, 45), 1))
         p.drawLine(QPointF(left_x - 3, 12), QPointF(left_x - 3, h - 12))
 
+        # Robo lives on the pill: happy when idle, focused at work, wide-eyed when you are needed
+        idle = dot_col is None
+        robo = pastel(c2, 0.7) if idle else dot_col
+        now_s = time.monotonic()
+        cx = left_x + 9.0 + (math.sin(now_s * 22.0) * 0.9 if waiting else 0.0)
+        cy = h / 2.0 + 0.5 + math.sin(now_s * 2.4) * (0.8 if idle else 0.4)
+        blink = (now_s % 4.2) < 0.13
+        p.setPen(Qt.NoPen)
+        p.setBrush(with_alpha(robo, int((20 if idle else 34) + (30 if idle else 60) * beat)))
+        p.drawRoundedRect(QRectF(cx - 10.5, cy - 8.5, 21, 17), 7, 7)
+        p.setBrush(QColor(12, 15, 24, 238))
+        p.setPen(QPen(with_alpha(robo, 235), 1.2))
+        p.drawRoundedRect(QRectF(cx - 7.5, cy - 5.5, 15, 11), 4.5, 4.5)
+        p.drawLine(QPointF(cx, cy - 5.5), QPointF(cx, cy - 7.8))
+        p.setPen(Qt.NoPen)
+        p.setBrush(with_alpha(robo, 255))
+        p.drawEllipse(QPointF(cx, cy - 8.2), 1.1, 1.1)
+        if idle and not blink:
+            p.setBrush(Qt.NoBrush)
+            p.setPen(QPen(robo, 1.3, Qt.SolidLine, Qt.RoundCap))
+            for dx in (-3.0, 3.0):
+                p.drawArc(QRectF(cx + dx - 1.8, cy - 1.0, 3.6, 3.4), 0, 180 * 16)
+        else:
+            p.setBrush(robo)
+            eye_h = 1.6 if blink else (5.0 if waiting else 3.4)
+            for dx, lift in ((-3.0, 0.0), (3.0, -1.1 if waiting else 0.0)):
+                p.drawRoundedRect(QRectF(cx + dx - 1.4, cy - eye_h / 2.0 + lift, 2.8, eye_h),
+                                  1.4, 1.4)
+        pad = 20
+        region = QRectF(left_x + pad, 0, max(24.0, right_x - left_x - pad - 2), h)
         p.setFont(ui_font(10, QFont.Weight.DemiBold, True, 0.9))
-        p.setPen(QColor(0, 0, 0, 110))
-        p.drawText(QRectF(left_x, 1, right_x - left_x, h), Qt.AlignCenter, date_str)
-        p.setPen(QColor(255, 255, 255, 215))
-        p.drawText(QRectF(left_x, 0, right_x - left_x, h), Qt.AlignCenter, date_str)
+        fitted = p.fontMetrics().elidedText(status_str, Qt.ElideRight, int(region.width()))
+        head, sep, tail = fitted.partition(" · ")
+        if sep and head and tail:
+            fm = p.fontMetrics()
+            head_w = fm.horizontalAdvance(head + sep)
+            x0 = region.center().x() - (head_w + fm.horizontalAdvance(tail)) / 2.0
+            head_col = QColor(robo) if not idle else pastel(c2, 0.85)
+            for txt, x, col in ((head + sep, x0, head_col),
+                                (tail, x0 + head_w, QColor(255, 255, 255, 215))):
+                cell = QRectF(x, 0, fm.horizontalAdvance(txt) + 2, h)
+                p.setPen(QColor(0, 0, 0, 110))
+                p.drawText(cell.translated(0, 1), Qt.AlignLeft | Qt.AlignVCenter, txt)
+                p.setPen(col)
+                p.drawText(cell, Qt.AlignLeft | Qt.AlignVCenter, txt)
+        else:
+            p.setPen(QColor(0, 0, 0, 110))
+            p.drawText(region.translated(0, 1), Qt.AlignCenter, fitted)
+            p.setPen(QColor(255, 255, 255, 215))
+            p.drawText(region, Qt.AlignCenter, fitted)
 
         p.setBrush(QColor(12, 15, 24, 155))
         p.setPen(QPen(QColor(255, 255, 255, 55), 1))
@@ -6869,13 +10341,27 @@ class LiquidIsland(QWidget):
         p.setPen(QPen(QColor(255, 255, 255, 40), 2.5))
         p.drawEllipse(arc)
 
-        if self._battery is not None:
+        if focus_on:
+            frac = clamp01(focus.remaining / max(1.0, focus.total))
+            col = QColor(255, 178, 92) if focus.paused else pastel(c2, 0.78)
+            p.setPen(QPen(col, 2.5, Qt.SolidLine, Qt.RoundCap))
+            p.drawArc(arc, 90 * 16, int(-360 * 16 * frac))
+            left = focus.remaining
+            label = f"{int(left // 60)}" if left >= 60 else focus_clock(left)
+            p.setFont(ui_font(9 if len(label) <= 3 else 7, QFont.Weight.Bold, True))
+            p.setPen(QColor(0, 0, 0, 190))
+            p.drawText(disc.translated(0, 1), Qt.AlignCenter, label)
+            p.setPen(QColor(255, 255, 255, 250))
+            p.drawText(disc, Qt.AlignCenter, label)
+        elif self._battery is not None:
             pct, charging = self._battery
             low = pct <= 20 and not charging
             ring_col = (QColor(255, 105, 95) if low else
                         QColor(80, 220, 130) if charging else
                         pastel(c2, 0.7))
             span = int(-360 * 16 * max(0.02, pct / 100.0))
+            p.setPen(QPen(with_alpha(ring_col, 46 + int(30 * beat)), 5.0, Qt.SolidLine, Qt.RoundCap))
+            p.drawArc(arc, 90 * 16, span)
             p.setPen(QPen(ring_col, 2.5, Qt.SolidLine, Qt.RoundCap))
             p.drawArc(arc, 90 * 16, span)
 
@@ -6890,6 +10376,137 @@ class LiquidIsland(QWidget):
             p.setPen(QColor(255, 255, 255, 180))
             p.drawText(disc, Qt.AlignCenter, "—")
 
+        if focus_on and focus.progress > 0.004:
+            bar_w = max(0.0, (w - 24.0) * clamp01(focus.progress))
+            p.setPen(Qt.NoPen)
+            p.setBrush(with_alpha(pastel(c2, 0.85), 190))
+            p.drawRoundedRect(QRectF(12, h - 3.2, bar_w, 1.7), 0.85, 0.85)
+
+        # living edge: a soft light glides along the bottom lip (faster while an agent works)
+        sweep_x = ((now_s * (0.55 if agent_busy else 0.22)) % 1.6 - 0.3) * w
+        lip = QLinearGradient(sweep_x - 70, 0, sweep_x + 70, 0)
+        lip.setColorAt(0.0, with_alpha(robo, 0))
+        lip.setColorAt(0.5, with_alpha(robo, 210 if agent_busy else 120))
+        lip.setColorAt(1.0, with_alpha(robo, 0))
+        p.setPen(Qt.NoPen)
+        p.setBrush(lip)
+        p.drawRoundedRect(QRectF(16, h - 2.4, w - 32, 1.4), 0.7, 0.7)
+        if waiting:                                  # the pill breathes when it needs you
+            p.setBrush(Qt.NoBrush)
+            p.setPen(QPen(with_alpha(robo, int(40 + 100 * beat)), 1.4))
+            p.drawPath(notch_path(QRectF(1.2, 0, w - 2.4, h - 1.5), min(BOTTOM_RADIUS, h / 2) - 1,
+                                  closed=False))
+
+        p.restore()
+
+    def _paint_section_labels(self, p: QPainter):
+        """Home page cards: the now-playing and system panes (the agent card paints itself)."""
+        if not self.detail.isHidden() or self.home_page.isHidden():
+            return
+        c1, c2 = self.current_tints()
+        accent = pastel(c2, 0.85, 1.0)
+        p.save()
+        p.setRenderHints(QPainter.Antialiasing | QPainter.TextAntialiasing
+                         | QPainter.SmoothPixmapTransform)
+        offset = self.content.x()
+        for rect, tint in ((MUSIC_CARD, c1), (SYS_CARD, c2)):
+            card = QRectF(rect).translated(offset, 0).adjusted(0.5, 0.5, -0.5, -0.5)
+            body = QLinearGradient(card.topLeft(), card.bottomLeft())
+            body.setColorAt(0.0, QColor(255, 255, 255, 34))
+            body.setColorAt(1.0, QColor(255, 255, 255, 12))
+            p.setPen(Qt.NoPen)
+            p.setBrush(body)
+            p.drawRoundedRect(card, 18, 18)
+            p.save()
+            clip = QPainterPath()
+            clip.addRoundedRect(card, 18, 18)
+            p.setClipPath(clip)
+            wash = QLinearGradient(card.topLeft(), card.bottomRight())
+            wash.setColorAt(0.0, with_alpha(tint, 58))
+            wash.setColorAt(0.5, with_alpha(tint, 10))
+            wash.setColorAt(1.0, with_alpha(tint, 0))
+            p.setBrush(wash)
+            p.drawRect(card)
+            p.restore()
+            rim = QLinearGradient(card.topLeft(), card.bottomRight())
+            rim.setColorAt(0.0, QColor(255, 255, 255, 74))
+            rim.setColorAt(1.0, with_alpha(tint, 40))
+            p.setBrush(Qt.NoBrush)
+            p.setPen(QPen(QBrush(rim), 1.0))
+            p.drawRoundedRect(card, 18, 18)
+
+        # date + weather column of the system card
+        today = dt.date.today()
+        d = DATE_RECT.translated(offset, 0)
+        hair = QLinearGradient(0, d.top(), 0, d.bottom())
+        hair.setColorAt(0.0, QColor(255, 255, 255, 0))
+        hair.setColorAt(0.5, QColor(255, 255, 255, 46))
+        hair.setColorAt(1.0, QColor(255, 255, 255, 0))
+        p.setPen(QPen(QBrush(hair), 1.0))
+        p.drawLine(QPointF(d.left() - 4, d.top() + 6), QPointF(d.left() - 4, d.bottom() - 6))
+
+        def shadowed(rect, flags, text, col):
+            p.setPen(QColor(0, 0, 0, 110))
+            p.drawText(rect.translated(0, 1.2), flags, text)
+            p.setPen(col)
+            p.drawText(rect, flags, text)
+
+        p.setFont(ui_font(8, QFont.Weight.Bold, True, 1.6))
+        p.setPen(with_alpha(accent, 235))
+        p.drawText(QRectF(d.left(), d.top() + 1, 50, 11), Qt.AlignLeft | Qt.AlignVCenter,
+                   today.strftime("%a").upper())
+        self._cue.paint(p, QRect(int(d.right()) - 9, int(d.top()) + 2, 9, 9))
+        p.setFont(ui_font(36, QFont.Weight.Bold, True))
+        shadowed(QRectF(d.left() - 1, d.top() + 12, 72, 44), Qt.AlignLeft | Qt.AlignVCenter,
+                 str(today.day), QColor(255, 255, 255, 250))
+        p.setFont(ui_font(10, QFont.Weight.DemiBold, True, 0.4))
+        p.setPen(QColor(255, 255, 255, 214))
+        p.drawText(QRectF(d.left(), d.top() + 56, 70, 13), Qt.AlignLeft | Qt.AlignVCenter,
+                   today.strftime("%B"))
+        state = getattr(self.weather, "_state", None)
+        if state is not None:
+            kind, _label = weather_visual(int(state.code), bool(state.is_day))
+            paint_weather_icon(p, QRectF(d.left() - 1, d.top() + 72, 17, 17), kind, accent)
+            p.setFont(ui_font(11, QFont.Weight.Bold, True))
+            p.setPen(QColor(255, 255, 255, 238))
+            p.drawText(QRectF(d.left() + 19, d.top() + 71, 48, 18),
+                       Qt.AlignLeft | Qt.AlignVCenter, f"{round(state.temp)}°")
+        else:
+            p.setFont(ui_font(9, QFont.Weight.Medium, True, 0.6))
+            p.setPen(QColor(255, 255, 255, 130))
+            p.drawText(QRectF(d.left(), d.top() + 72, 68, 14), Qt.AlignLeft | Qt.AlignVCenter,
+                       str(today.year))
+        p.restore()
+
+    def _paint_top_trays(self, p: QPainter, w: int, h: int):
+        """Two faint glass trays hold the nav and the capture buttons."""
+        if self.rec_hud.isVisible():
+            return
+        open_frac = clamp01((w - COLLAPSED.width()) / max(1, W - COLLAPSED.width()))
+        if open_frac < 0.55:
+            return
+        alpha = int(52 * clamp01((open_frac - 0.55) / 0.45))
+        if alpha <= 2:
+            return
+        p.save()
+        p.setPen(QPen(QColor(255, 255, 255, alpha // 2), 1.0))
+        grad = QLinearGradient(0, 3, 0, 34)
+        grad.setColorAt(0.0, QColor(255, 255, 255, alpha))
+        grad.setColorAt(1.0, QColor(255, 255, 255, max(4, alpha - 22)))
+        p.setBrush(grad)
+        offset = self.content.x()
+        nav = QRectF(self._nav_rect).translated(offset, 0)
+        if self.back_btn.isVisible() or self.inner_btn.isVisible():
+            nav.setRight(nav.right() + 31)                      # tray grows to hold the button
+            p.drawRoundedRect(nav, nav.height() / 2, nav.height() / 2)
+            p.setPen(QPen(QColor(255, 255, 255, alpha), 1.0))
+            x = self._nav_rect.right() + offset + 1.0
+            p.drawLine(QPointF(x, 10), QPointF(x, 27))          # hairline before the button
+            p.setPen(QPen(QColor(255, 255, 255, alpha // 2), 1.0))
+        else:
+            p.drawRoundedRect(nav, nav.height() / 2, nav.height() / 2)
+        cap = QRectF(self._cap_rect).translated(offset, 0)
+        p.drawRoundedRect(cap, cap.height() / 2, cap.height() / 2)
         p.restore()
 
     def paintEvent(self, _e):
@@ -6945,6 +10562,9 @@ class LiquidIsland(QWidget):
 
         pill_alpha = 1.0 - clamp01(((w - COLLAPSED.width()) / max(1, W - COLLAPSED.width())) * 3.0)
         self._paint_collapsed_pill(p, w, h, c2, pill_alpha)
+        self._paint_top_trays(p, w, h)
+        if w > W - 40:
+            self._paint_section_labels(p)
         p.restore()
 
         p.setBrush(Qt.NoBrush)
@@ -6960,6 +10580,7 @@ class LiquidIsland(QWidget):
         self.env_timer.stop()
         self.fx_timer.stop()
         self.hud_timer.stop()
+        self.pill_timer.stop()
         recorder, self._recorder = self._recorder, None
         if recorder is not None:
             recorder.request_stop()
@@ -6971,6 +10592,17 @@ class LiquidIsland(QWidget):
             self._settings.hide()
             self._settings.deleteLater()
             self._settings = None
+        try:
+            self.agent_watch.stop()
+        except Exception:
+            pass
+        for thread in list(self._lyrics_threads):
+            try:
+                thread.requestInterruption()
+                thread.wait(4500)
+            except Exception:
+                pass
+        self._lyrics_threads.clear()
         self.worker.stop()
         self.tray.hide()
 
